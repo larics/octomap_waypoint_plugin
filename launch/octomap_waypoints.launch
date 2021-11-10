@@ -1,0 +1,7 @@
+<launch>
+
+    <include file="$(find uav_ros_tracker)/launch/waypoint_manager.launch">
+        <arg name="planner_name" value="OctomapPlannerClient"/>
+    </include>
+
+</launch>

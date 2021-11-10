@@ -1,0 +1,5 @@
+<library path="lib/liboctomap_planner_client">
+  <class name="OctomapPlannerClient" type="uav_ros_tracker::OctomapPlannerClient" base_class_type="uav_ros_tracker::planner_interface">
+    <description>An OctomapPlannerClient plugin.</description>
+  </class>
+</library>
