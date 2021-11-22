@@ -1,6 +1,11 @@
 #include "geometry_msgs/PoseStamped.h"
+#include "larics_motion_planning/MultiDofTrajectoryRequest.h"
 #include "ros/duration.h"
 #include "ros/forwards.h"
+#include "tf2/LinearMath/Transform.h"
+#include "tf2/convert.h"
+#include "tf2_geometry_msgs/tf2_geometry_msgs.h"
+#include "uav_ros_msgs/Waypoint.h"
 #include <ios>
 #include <mutex>
 #include <octomap_waypoint_plugin/octomap_planner_client.hpp>
@@ -66,7 +71,7 @@ bool uav_ros_tracker::OctomapPlannerClient::initialize(
   m_tracking_frame = std::move(tracking_frame);
   m_transform_map  = std::move(transform_map);
   m_planner_client =
-    nh.serviceClient<larics_motion_planning::MultiDofTrajectory>("octomap_planner");
+    nh.serviceClient<larics_motion_planning::MultiDofTrajectory>("/uav/multi_dof_trajectory");
   m_tracker_trajectory_pub =
     nh.advertise<trajectory_msgs::MultiDOFJointTrajectory>("tracker/input_trajectory", 1);
 
@@ -145,8 +150,7 @@ std::tuple<bool, std::string, uav_ros_msgs::WaypointPtr>
       false, "Tracker is busy!", {});
   }
 
-  if (!m_planning_timer.hasPending())
-  {
+  if (!m_planning_timer.hasPending()) {
     m_planning_timer.setPeriod(ros::Duration(0.01), true);
   }
 
@@ -174,10 +178,52 @@ void uav_ros_tracker::OctomapPlannerClient::plannning_callback(const ros::TimerE
     return;
   }
 
-  // TODO: do the planning here
+  // Get the current carrot pose
+  geometry_msgs::PoseStamped current_carrot_pose;
+  {
+    std::lock_guard<std::mutex> lock(m_carrot_pose_mutex);
+    current_carrot_pose = m_carrot_pose;
+  }
+
+  // Get the current waypoint
+  uav_ros_msgs::Waypoint current_waypoint;
+  {
+    std::lock_guard<std::mutex> lock(m_waypoint_buffer_mutex);
+    if (m_waypoint_buffer.empty()) {
+      ROS_WARN("[%s::plannning_callback] No waypoints to plan!", NAME);
+      return;
+    }
+
+    current_waypoint = *m_waypoint_buffer.front();
+  }
+
+  // Transform carrot pose
+  auto waypoint_frame = current_waypoint.pose.header.frame_id;
+  if (m_transform_map.count(waypoint_frame) == 0) {
+    ROS_FATAL_THROTTLE(2.0,
+                       "[%s::plannning_callback] waypoint frame %s unrecognized",
+                       NAME,
+                       waypoint_frame.c_str());
+    return;
+  }
+
+  auto           tracking_to_waypoint = m_transform_map.at(waypoint_frame);
+  tf2::Transform tracking_to_waypoint_transform, waypoint_to_tracking_transform;
+  tf2::fromMsg(tracking_to_waypoint.transform, tracking_to_waypoint_transform);
+  waypoint_to_tracking_transform = tracking_to_waypoint_transform.inverse();
+  auto waypoint_to_tracking      = tf2::toMsg(waypoint_to_tracking_transform);
+
+  geometry_msgs::PoseStamped transformed_carrot_pose;
+  tf2::doTransform(
+    current_carrot_pose, transformed_carrot_pose, m_transform_map.at(waypoint_frame));
+
+  // Do the planning
+  larics_motion_planning::MultiDofTrajectoryRequest planning_request;
+  // planning_request.waypoints
 }
 
-void uav_ros_tracker::OctomapPlannerClient::carrot_pose_cb(const geometry_msgs::PoseStamped& msg)
+void uav_ros_tracker::OctomapPlannerClient::carrot_pose_cb(
+  const geometry_msgs::PoseStamped& msg)
 {
   std::lock_guard<std::mutex> lock(m_carrot_pose_mutex);
   m_carrot_pose = msg;
