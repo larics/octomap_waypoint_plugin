@@ -1,16 +1,20 @@
 #include "geometry_msgs/PoseStamped.h"
+#include "geometry_msgs/TransformStamped.h"
 #include "larics_motion_planning/MultiDofTrajectoryRequest.h"
 #include "ros/duration.h"
 #include "ros/forwards.h"
 #include "tf2/LinearMath/Transform.h"
 #include "tf2/convert.h"
 #include "tf2_geometry_msgs/tf2_geometry_msgs.h"
+#include "trajectory_msgs/JointTrajectory.h"
+#include "trajectory_msgs/JointTrajectoryPoint.h"
 #include "uav_ros_msgs/Waypoint.h"
 #include <ios>
 #include <mutex>
 #include <octomap_waypoint_plugin/octomap_planner_client.hpp>
 #include <larics_motion_planning/MultiDofTrajectory.h>
 #include <trajectory_msgs/MultiDOFJointTrajectory.h>
+#include <uav_ros_lib/ros_convert.hpp>
 
 void uav_ros_tracker::OctomapPlannerClient::addWaypoint(
   const uav_ros_msgs::Waypoint& waypoint)
@@ -68,10 +72,15 @@ bool uav_ros_tracker::OctomapPlannerClient::initialize(
   std::unordered_map<std::string, geometry_msgs::TransformStamped> transform_map,
   std::string                                                      tracking_frame)
 {
+  m_carrot_pose.pose.orientation.x = 0;
+  m_carrot_pose.pose.orientation.y = 0;
+  m_carrot_pose.pose.orientation.z = 0;
+  m_carrot_pose.pose.orientation.w = 1;
+
   m_tracking_frame = std::move(tracking_frame);
   m_transform_map  = std::move(transform_map);
-  m_planner_client =
-    nh.serviceClient<larics_motion_planning::MultiDofTrajectory>("/uav/multi_dof_trajectory");
+  m_planner_client = nh.serviceClient<larics_motion_planning::MultiDofTrajectory>(
+    "/uav/multi_dof_trajectory");
   m_tracker_trajectory_pub =
     nh.advertise<trajectory_msgs::MultiDOFJointTrajectory>("tracker/input_trajectory", 1);
 
@@ -86,6 +95,7 @@ bool uav_ros_tracker::OctomapPlannerClient::initialize(
                                     this,
                                     true /* oneshot */,
                                     false /*autostart */);
+
   return true;
 }
 
@@ -207,19 +217,71 @@ void uav_ros_tracker::OctomapPlannerClient::plannning_callback(const ros::TimerE
     return;
   }
 
-  auto           tracking_to_waypoint = m_transform_map.at(waypoint_frame);
-  tf2::Transform tracking_to_waypoint_transform, waypoint_to_tracking_transform;
-  tf2::fromMsg(tracking_to_waypoint.transform, tracking_to_waypoint_transform);
-  waypoint_to_tracking_transform = tracking_to_waypoint_transform.inverse();
-  auto waypoint_to_tracking      = tf2::toMsg(waypoint_to_tracking_transform);
+  // Carrot pose is in the current tracking frame
+  // Transform it to the waypoint frame to figure out where to start planning
+  const auto     waypoint_to_tracking = m_transform_map.at(waypoint_frame);
+  tf2::Transform waypoint_to_tracking_transform;
+  tf2::fromMsg(waypoint_to_tracking.transform, waypoint_to_tracking_transform);
+  const auto tracking_to_waypoint_transform = waypoint_to_tracking_transform.inverse();
+  const auto tracking_to_waypoint           = tf2::toMsg(tracking_to_waypoint_transform);
 
+  // doTransfrom wants TransfromStamped and not Transfrom
+  geometry_msgs::TransformStamped tracking_to_waypoint_stamped;
+  tracking_to_waypoint_stamped.transform = tracking_to_waypoint;
+
+  // Finally transform the carrot pose
   geometry_msgs::PoseStamped transformed_carrot_pose;
   tf2::doTransform(
-    current_carrot_pose, transformed_carrot_pose, m_transform_map.at(waypoint_frame));
+    current_carrot_pose, transformed_carrot_pose, tracking_to_waypoint_stamped);
 
-  // Do the planning
-  larics_motion_planning::MultiDofTrajectoryRequest planning_request;
-  // planning_request.waypoints
+  // Pack the carrot point to JointTrajectoryPoint
+  trajectory_msgs::JointTrajectoryPoint carrot_point;
+  carrot_point.positions =
+    std::vector<double>{ transformed_carrot_pose.pose.position.x,
+                         transformed_carrot_pose.pose.position.y,
+                         transformed_carrot_pose.pose.position.z,
+                         ros_convert::calculateYaw(
+                           transformed_carrot_pose.pose.orientation.x,
+                           transformed_carrot_pose.pose.orientation.y,
+                           transformed_carrot_pose.pose.orientation.z,
+                           transformed_carrot_pose.pose.orientation.w) };
+
+  // Pack the waypoint point to JointTrajectoryPoint
+  trajectory_msgs::JointTrajectoryPoint waypoint_point;
+  waypoint_point.positions =
+    std::vector<double>{ current_waypoint.pose.pose.position.x,
+                         current_waypoint.pose.pose.position.y,
+                         current_waypoint.pose.pose.position.z,
+                         ros_convert::calculateYaw(
+                           current_waypoint.pose.pose.orientation.x,
+                           current_waypoint.pose.pose.orientation.y,
+                           current_waypoint.pose.pose.orientation.z,
+                           current_waypoint.pose.pose.orientation.w) };
+
+  ROS_INFO_STREAM_THROTTLE(
+    2.0, "[plannning_callback] transformed carrot pose " << transformed_carrot_pose);
+
+  ROS_INFO_STREAM_THROTTLE(
+    2.0, "[plannning_callback] waypoint_pose pose " << current_waypoint.pose);
+
+  // Pack the points in the request
+  larics_motion_planning::MultiDofTrajectory planning_service;
+  planning_service.request.waypoints.points =
+    std::vector<trajectory_msgs::JointTrajectoryPoint>{ carrot_point, waypoint_point };
+  planning_service.request.waypoints.joint_names =
+    std::vector<std::string>{ "x", "y", "z", "yaw" };
+  planning_service.request.plan_trajectory = true;
+
+  auto call_success = m_planner_client.call(planning_service);
+  if (!call_success) {
+    ROS_FATAL_THROTTLE(
+      2.0, "[%s::plannning_callback] call to plannning service failed.", NAME);
+    return;
+  }
+
+  auto planning_response = planning_service.response;
+  ROS_INFO_THROTTLE(1.0, "Path length: %ld, trajectory length: %ld", planning_response.path.points.size(), planning_response.trajectory.joint_names.size());
+  // TODO: Do something with the response
 }
 
 void uav_ros_tracker::OctomapPlannerClient::carrot_pose_cb(

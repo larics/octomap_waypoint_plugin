@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.0.2)
 project(octomap_waypoint_plugin)
 
-find_package(catkin REQUIRED COMPONENTS uav_ros_tracker uav_ros_msgs
+find_package(catkin REQUIRED COMPONENTS uav_ros_tracker uav_ros_msgs uav_ros_lib
                                         larics_motion_planning)
 
 catkin_package(
