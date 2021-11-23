@@ -79,6 +79,8 @@ bool uav_ros_tracker::OctomapPlannerClient::initialize(
 
   m_tracking_frame = std::move(tracking_frame);
   m_transform_map  = std::move(transform_map);
+  m_carrot_pose_sub =
+    nh.subscribe("carrot/pose", 1, &OctomapPlannerClient::carrot_pose_cb, this);
   m_planner_client = nh.serviceClient<larics_motion_planning::MultiDofTrajectory>(
     "/uav/multi_dof_trajectory");
   m_tracker_trajectory_pub =
@@ -271,6 +273,7 @@ void uav_ros_tracker::OctomapPlannerClient::plannning_callback(const ros::TimerE
   planning_service.request.waypoints.joint_names =
     std::vector<std::string>{ "x", "y", "z", "yaw" };
   planning_service.request.plan_trajectory = true;
+  planning_service.request.plan_path       = true;
 
   auto call_success = m_planner_client.call(planning_service);
   if (!call_success) {
@@ -280,7 +283,16 @@ void uav_ros_tracker::OctomapPlannerClient::plannning_callback(const ros::TimerE
   }
 
   auto planning_response = planning_service.response;
-  ROS_INFO_THROTTLE(1.0, "Path length: %ld, trajectory length: %ld", planning_response.path.points.size(), planning_response.trajectory.joint_names.size());
+  if (!planning_response.success) {
+    ROS_WARN_THROTTLE(2.0, "[%s::plannning_callback] Planning failed!", NAME);
+    // TODO: Do something if planning fails...
+    return;
+  }
+
+  ROS_INFO_THROTTLE(1.0,
+                    "Path length: %ld, trajectory length: %ld",
+                    planning_response.path.points.size(),
+                    planning_response.trajectory.joint_names.size());
   // TODO: Do something with the response
 }
 

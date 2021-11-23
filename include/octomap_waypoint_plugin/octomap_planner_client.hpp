@@ -5,6 +5,7 @@
 #include "geometry_msgs/TransformStamped.h"
 #include "ros/forwards.h"
 #include "ros/service_client.h"
+#include "ros/subscriber.h"
 #include <uav_ros_tracker/planner_interface.hpp>
 #include <deque>
 #include <mutex>
@@ -50,6 +51,7 @@ private:
 
   geometry_msgs::PoseStamped m_carrot_pose;
   std::mutex                 m_carrot_pose_mutex;
+  ros::Subscriber            m_carrot_pose_sub;
   void                       carrot_pose_cb(const geometry_msgs::PoseStamped& pose);
 
   bool                                                             m_is_flying  = false;
