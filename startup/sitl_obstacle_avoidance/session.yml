@@ -32,14 +32,16 @@ windows:
           configuration_basename:=slam_sim.lua 
           map_frame:=$UAV_NAMESPACE/map/map 
           points2:=map/velodyne_points
-        - waitForRos; roslaunch uav_ros_general velocity_estimation_acc.launch
+        - inspection_ws; waitForRos; roslaunch sensor_fusion sensor_fusion.launch 
+          config_yaml:=custom_config/sensor_client_carto_sim.yaml
   - arm&takeof:
       layout: tiled
       panes:
         - waitForRos; roslaunch uav_ros_control pid_carrot.launch 
           carrot_land:=true 
           manual_takeoff:=false 
-          odometry:=uav/cartographer/odometry_filtered_acc
+          odometry:=es_ekf/odom
+          local_callback_enable:=true
           land_disarm_enabled:=true
           control_type:=pid_cascade_node_yawrate
           default_params:=custom_config/position_control_thrust.params.yaml
