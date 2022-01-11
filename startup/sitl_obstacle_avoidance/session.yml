@@ -24,6 +24,7 @@ windows:
           name:=$UAV_NAMESPACE/map
           remap_gazebo_tf:=true
           laser_count:=32
+          gui:=false
         - waitForRos; waitForSimulation; waitForSysStatus; rosparam set use_sim_time true; 
           roslaunch uav_ros_general cartographer.launch 
           simulation:=true 
@@ -43,8 +44,7 @@ windows:
           control_type:=pid_cascade_node_yawrate
           default_params:=custom_config/position_control_thrust.params.yaml
           carrot_config:=custom_config/carrot_config.yaml
-        - waitForRos; waitForSimulation; waitForSLAM; 
-          rosrun ardupilot_gazebo automatic_takeoff.sh
+        - waitForRos; waitForSLAM; rosrun ardupilot_gazebo automatic_takeoff.sh 2 override_odom
   - trajectory:
       layout: tiled
       panes:
