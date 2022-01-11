@@ -19,10 +19,12 @@ windows:
         - waitForRos; roslaunch ardupilot_gazebo kopterworx.launch 
           use_sim_time:=true
           enable_velodyne:=true
-          max_range:=30
+          max_range:=20
           world:=$(rospack find larics_gazebo_worlds)/worlds/simple_slam.world
           name:=$UAV_NAMESPACE/map
-        - waitForRos; waitForSimulation; sleep 10; rosparam set use_sim_time true; 
+          remap_gazebo_tf:=true
+          laser_count:=32
+        - waitForRos; waitForSimulation; waitForSysStatus; rosparam set use_sim_time true; 
           roslaunch uav_ros_general cartographer.launch 
           simulation:=true 
           configuration_directory:=$(pwd)/custom_config 
@@ -40,9 +42,14 @@ windows:
           land_disarm_enabled:=true
           control_type:=pid_cascade_node_yawrate
           default_params:=custom_config/position_control_thrust.params.yaml
-        - waitForRos; waitForSimulation; waitForSLAM; sleep 10; 
-          rosrun ardupilot_gazebo automatic_takeoff.sh       
+          carrot_config:=custom_config/carrot_config.yaml
+        - waitForRos; waitForSimulation; waitForSLAM; 
+          rosrun ardupilot_gazebo automatic_takeoff.sh
   - trajectory:
       layout: tiled
       panes:
         - waitForRos; roslaunch uav_ros_tracker topp_tracker.launch tracker_config:=custom_config/topp_config_custom.yaml
+  - rviz:
+      layout: tiled
+      panes:
+        - waitForRos; waitForSLAM; rviz -d custom_config/carto.rviz
