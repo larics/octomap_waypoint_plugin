@@ -82,7 +82,7 @@ bool uav_ros_tracker::OctomapPlannerClient::initialize(
   m_carrot_pose_sub =
     nh.subscribe("carrot/pose", 1, &OctomapPlannerClient::carrot_pose_cb, this);
   m_planner_client = nh.serviceClient<larics_motion_planning::MultiDofTrajectory>(
-    "/uav/multi_dof_trajectory");
+    "multi_dof_trajectory");
   m_tracker_trajectory_pub =
     nh.advertise<trajectory_msgs::MultiDOFJointTrajectory>("tracker/input_trajectory", 1);
 

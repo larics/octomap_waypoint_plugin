@@ -3,7 +3,7 @@ root: ./
 startup_window: roscore
 pre_window: |
   export UAV_NAMESPACE=red
-  source ~/Workspace/inspection_ws/devel/setup.zsh
+  planning_ws
   export ODOMETRY_TOPIC=es_ekf/odom
   export SF_CARTO_MAP=eagle/carto_raw
 windows:
@@ -31,7 +31,7 @@ windows:
           gui:=false
           x:=2
           y:=2
-        - waitForRos; rosparam set use_sim_time true; waitForSimulation; waitForSysStatus;
+        - inspection_ws; waitForRos; rosparam set use_sim_time true; waitForSimulation; waitForSysStatus;
           roslaunch uav_ros_general cartographer.launch 
           simulation:=true 
           configuration_directory:=$(pwd)/custom_config 
@@ -61,8 +61,15 @@ windows:
       layout: tiled
       panes:
         - waitForRos; roslaunch uav_ros_tracker topp_tracker.launch tracker_config:=custom_config/topp_config_custom.yaml
-        - waitForRos; roslaunch uav_ros_tracker waypoint_manager.launch odometry:=es_ekf/odom
+        - waitForRos; roslaunch uav_ros_tracker waypoint_manager.launch odometry:=es_ekf/odom planner_name:=OctomapPlannerClient
         - waitForRos; rosrun uav_ros_tracker rviz_clicker.py __ns:=$UAV_NAMESPACE
+  - planner:
+      layout: tiled
+      panes:
+        - waitForRos; roslaunch octomap_waypoint_plugin octomap_server.launch
+          map_frame_id:=eagle/carto_raw
+          base_link_frame_id:=eagle/robot
+        - waitForRos; rosparam set use_sim_time true; roslaunch octomap_waypoint_plugin global_planner.launch
   - rviz:
       layout: tiled
       panes:
