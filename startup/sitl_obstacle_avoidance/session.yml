@@ -5,6 +5,7 @@ pre_window: |
   export UAV_NAMESPACE=red
   source ~/Workspace/inspection_ws/devel/setup.zsh
   export ODOMETRY_TOPIC=es_ekf/odom
+  export SF_CARTO_MAP=eagle/carto_raw
 windows:
   - roscore:
       layout: tiled
@@ -39,6 +40,7 @@ windows:
           points2:=map/velodyne_points
           enable_starter:=true
           starter_odom:=map/odometry
+          map_frame:=$SF_CARTO_MAP
         - inspection_ws; waitForRos; roslaunch sensor_fusion sensor_fusion.launch 
           config_yaml:=custom_config/sensor_client_carto_sim.yaml
   - arm&takeof:

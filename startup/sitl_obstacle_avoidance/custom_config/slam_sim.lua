@@ -16,10 +16,15 @@ include "map_builder.lua"
 include "trajectory_builder.lua"
 namespace = os.getenv("UAV_NAMESPACE")
 
+map_frame = os.getenv("SF_CARTO_MAP")
+if  map_frame == nil or map_frame == '' then
+  map_frame = namespace.."/map/map"
+end
+
 options = {
   map_builder = MAP_BUILDER,
   trajectory_builder = TRAJECTORY_BUILDER,
-  map_frame =  namespace.."/map/map",
+  map_frame =  map_frame,
   tracking_frame =  namespace.."/map/base_link",
   published_frame =  namespace.."/map/base_link",
   odom_frame = namespace.."/map/odom",
