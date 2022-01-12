@@ -1,7 +1,10 @@
 name: obstacle
 root: ./
 startup_window: roscore
-pre_window: export UAV_NAMESPACE=red; source ~/Workspace/inspection_ws/devel/setup.zsh
+pre_window: |
+  export UAV_NAMESPACE=red
+  source ~/Workspace/inspection_ws/devel/setup.zsh
+  export ODOMETRY_TOPIC=es_ekf/odom
 windows:
   - roscore:
       layout: tiled
@@ -25,13 +28,17 @@ windows:
           remap_gazebo_tf:=true
           laser_count:=32
           gui:=false
-        - waitForRos; waitForSimulation; waitForSysStatus; rosparam set use_sim_time true; 
+          x:=2
+          y:=2
+        - waitForRos; rosparam set use_sim_time true; waitForSimulation; waitForSysStatus;
           roslaunch uav_ros_general cartographer.launch 
           simulation:=true 
           configuration_directory:=$(pwd)/custom_config 
           configuration_basename:=slam_sim.lua 
           map_frame:=$UAV_NAMESPACE/map/map 
           points2:=map/velodyne_points
+          enable_starter:=true
+          starter_odom:=map/odometry
         - inspection_ws; waitForRos; roslaunch sensor_fusion sensor_fusion.launch 
           config_yaml:=custom_config/sensor_client_carto_sim.yaml
   - arm&takeof:
@@ -40,13 +47,13 @@ windows:
         - waitForRos; roslaunch uav_ros_control pid_carrot.launch 
           carrot_land:=true 
           manual_takeoff:=false 
-          odometry:=es_ekf/odom
+          odometry:=$ODOMETRY_TOPIC
           local_callback_enable:=true
           land_disarm_enabled:=true
           control_type:=pid_cascade_node_yawrate
           default_params:=custom_config/position_control_thrust.params.yaml
           carrot_config:=custom_config/carrot_config.yaml
-        - waitForRos; waitForSLAM; rosrun ardupilot_gazebo automatic_takeoff.sh 2 override_odom
+        - waitForRos; waitFor /$UAV_NAMESPACE/$ODOMETRY_TOPIC; rosrun ardupilot_gazebo automatic_takeoff.sh 2 override_odom
   - trajectory:
       layout: tiled
       panes:
@@ -54,4 +61,4 @@ windows:
   - rviz:
       layout: tiled
       panes:
-        - waitForRos; waitForSLAM; rviz -d custom_config/carto.rviz
+        - waitForRos; waitFor /$UAV_NAMESPACE/$ODOMETRY_TOPIC; rviz -d custom_config/carto.rviz

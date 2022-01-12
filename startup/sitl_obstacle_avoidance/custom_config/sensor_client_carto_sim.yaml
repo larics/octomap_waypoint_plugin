@@ -28,7 +28,7 @@ g: [0,0,-10.34]
 g_p_cov: 0.1
 
 #position sensor params
-Sensor_prefix: [carto]
+Sensor_prefix: [carto, gazebo]
 initial_sensor: carto
 
 #carto
@@ -44,3 +44,17 @@ carto_translation: [-4.048,3.654,0.176]
 carto_origin_at_first_measurement: true
 carto_position_outlier_lim: [1, 1, 2]
 carto_orientation_outlier_lim: [0, 0, 0]
+
+#gazebo
+gazebo_is_orientation_sensor: true
+gazebo_is_velocity_sensor: false
+gazebo_estimate_drift: true
+gazebo_topic: map/odometry
+gazebo_msg_type: 0
+gazebo_R_pose: [0.05, 0.05, 0.01]
+gazebo_R_angle: [0.1, 0.1, 0.1]
+gazebo_rotation: [1,0,0,0,1,0,0,0,1]
+gazebo_translation: [0,0,0]
+gazebo_origin_at_first_measurement: true
+gazebo_position_outlier_lim: [10, 10, 10]
+gazebo_orientation_outlier_lim: [0, 0, 0]
