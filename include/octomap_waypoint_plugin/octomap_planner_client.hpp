@@ -40,8 +40,10 @@ public:
     bool                      control_enabled  = true) override;
 
 private:
+  std::optional<uav_ros_msgs::WaypointPtr> getCurrentWaypoint();
+  double                distanceToCurrentWp(const nav_msgs::Odometry& odom);
   static constexpr auto NAME         = "OctomapPlannerClient";
-  static constexpr auto DISTANCE_TOL = 0.3;
+  static constexpr auto DISTANCE_TOL = 0.5;
 
   ros::Timer m_waiting_timer;
   void       waiting_callback(const ros::TimerEvent& e);

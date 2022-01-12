@@ -69,7 +69,8 @@ windows:
         - waitForRos; roslaunch octomap_waypoint_plugin octomap_server.launch
           map_frame_id:=eagle/carto_raw
           base_link_frame_id:=eagle/robot
-        - waitForRos; rosparam set use_sim_time true; roslaunch octomap_waypoint_plugin global_planner.launch
+        - waitForRos; rosparam set use_sim_time true; roslaunch octomap_waypoint_plugin global_planner.launch 
+          frame_id:=$SF_CARTO_MAP
   - rviz:
       layout: tiled
       panes:
