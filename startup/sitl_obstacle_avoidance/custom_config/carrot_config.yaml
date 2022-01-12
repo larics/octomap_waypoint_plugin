@@ -5,7 +5,7 @@ carrot_index: 5
 carrot_enable: 1
 
 # Fame ID where the reference is published
-carrot_frame_id: "world"
+carrot_frame_id: "eagle/ekf"
 
 # If carrot land is false landing is done by asking Mavros to go to 'LAND' mode
 # Otherwise, land mode is done by lowering the Carrot Reference

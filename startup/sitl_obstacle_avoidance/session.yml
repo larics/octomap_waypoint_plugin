@@ -55,11 +55,14 @@ windows:
           control_type:=pid_cascade_node_yawrate
           default_params:=custom_config/position_control_thrust.params.yaml
           carrot_config:=custom_config/carrot_config.yaml
+          carrot_frame_id:=eagle/ekf
         - waitForRos; waitFor /$UAV_NAMESPACE/$ODOMETRY_TOPIC; rosrun ardupilot_gazebo automatic_takeoff.sh 2 override_odom
   - trajectory:
       layout: tiled
       panes:
         - waitForRos; roslaunch uav_ros_tracker topp_tracker.launch tracker_config:=custom_config/topp_config_custom.yaml
+        - waitForRos; roslaunch uav_ros_tracker waypoint_manager.launch odometry:=es_ekf/odom
+        - waitForRos; rosrun uav_ros_tracker rviz_clicker.py __ns:=$UAV_NAMESPACE
   - rviz:
       layout: tiled
       panes:
