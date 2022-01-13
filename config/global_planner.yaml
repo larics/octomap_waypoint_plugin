@@ -1,29 +1,29 @@
 global_planner:
-  map_config_file: "Workspace/planning_ws/src/octomap_waypoint_plugin_modules/larics_motion_planning/config/danieli_uav_config.yaml"
-  trajectory_config_file: "Workspace/planning_ws/src/octomap_waypoint_plugin_modules/larics_motion_planning/config/danieli_uav_config.yaml"
-  path_planner_config_file: "Workspace/planning_ws/src/octomap_waypoint_plugin_modules/larics_motion_planning/config/danieli_uav_config.yaml"
-  state_validity_checker_config_file: "Workspace/planning_ws/src/octomap_waypoint_plugin_modules/larics_motion_planning/config/danieli_uav_config.yaml"
-  kinematics_config_file: "Workspace/planning_ws/src/octomap_waypoint_plugin_modules/larics_motion_planning/config/danieli_uav_config.yaml"
+  map_config_file: "Workspace/planning_ws/src/octomap_waypoint_plugin/config/global_planner.yaml"
+  trajectory_config_file: "Workspace/planning_ws/src/octomap_waypoint_plugin/config/global_planner.yaml"
+  path_planner_config_file: "Workspace/planning_ws/src/octomap_waypoint_plugin/config/global_planner.yaml"
+  state_validity_checker_config_file: "Workspace/planning_ws/src/octomap_waypoint_plugin/config/global_planner.yaml"
+  kinematics_config_file: "Workspace/planning_ws/src/octomap_waypoint_plugin/config/global_planner.yaml"
   model_correction_file: "Workspace/planning_ws/src/octomap_waypoint_plugin_modules/larics_motion_planning/config/model_correction_config_example.yaml"
 
   # If planning for trajectory only, global planner will try to plan several
   # times if previous attempts fail. In case all attempts fail, empty trajectory
   # is returned
   trajectory:
-    restarts: 5
+    restarts: 1
 
   # If planning for both path and trajectory, the global planner tries to plan
   # several times to ensure obstacle free trajectory.
   path_and_trajectory:
-    restarts: 5
+    restarts: 1
 
   path:
     # Sometimes RRT* path planning fails and succeeds on next attempt. This
     # will restart it several times in case of failure.
-    restarts: 5
+    restarts: 1
     # The path should be collision free, but in case it is not the planner restarts.
     # This behavior can be switched off by setting false to collision_check flag.
-    collision_check_restarts: 5
+    collision_check_restarts: 1
     collision_check: true
 
   parabolic_airdrop:
@@ -73,7 +73,7 @@ octomap:
   # Search depth of octomap tree. 16 is best resolution, slowest search(although
   # experience shows that there is no significant increase in search time by 
   # setting this parameter to < 16)
-  search_depth: 16
+  search_depth: 14
 
 path_planner:
   spaces:
@@ -87,7 +87,7 @@ path_planner:
     types: ["RealVector", "SO2"]
     # Bounds are defined by 
     #bounds: [[[-20, 20], [-10, 20], [0.0, 20.0], [-3.15, 3.15]]]
-    bounds: [[[-150, 150], [-150, 150], [1.0, 1.0]], [[-3.15, 3.15]]]
+    bounds: [[[-150, 150], [-150, 150], [0.8, 1.5]], [[-3.15, 3.15]]]
 
   # RRT* parameter set
 
@@ -107,7 +107,7 @@ path_planner:
   # Maximum length of a motion added in the tree of motions.
   range:
     is_used: true
-    value: 5
+    value: 0.75 # Depends on space size
   # Rewiring scale factor
   rewire_factor:
     is_used: false

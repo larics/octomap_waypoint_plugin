@@ -56,7 +56,7 @@ windows:
           default_params:=custom_config/position_control_thrust.params.yaml
           carrot_config:=custom_config/carrot_config.yaml
           carrot_frame_id:=eagle/ekf
-        - waitForRos; waitFor /$UAV_NAMESPACE/$ODOMETRY_TOPIC; rosrun ardupilot_gazebo automatic_takeoff.sh 2 override_odom
+        - waitForRos; waitFor /$UAV_NAMESPACE/$ODOMETRY_TOPIC; rosrun ardupilot_gazebo automatic_takeoff.sh 1 override_odom
   - trajectory:
       layout: tiled
       panes:
