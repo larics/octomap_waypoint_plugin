@@ -1,0 +1,2 @@
+octomap_planner_client:
+  plan_and_fly: false

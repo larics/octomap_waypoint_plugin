@@ -255,7 +255,7 @@ Visualization Manager:
       Octomap Topic: /red/octomap_binary
       Queue Size: 5
       Value: true
-      Voxel Alpha: 1
+      Voxel Alpha: 0.30000001192092896
       Voxel Coloring: Z-Axis
       Voxel Rendering: Occupied Voxels
   Enabled: true
@@ -286,7 +286,7 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz/Orbit
-      Distance: 43.838233947753906
+      Distance: 38.92979431152344
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
@@ -294,9 +294,9 @@ Visualization Manager:
         Value: false
       Field of View: 0.7853981852531433
       Focal Point:
-        X: 1.8853724002838135
-        Y: -3.310760259628296
-        Z: 3.915433406829834
+        X: 0.36072400212287903
+        Y: -3.4607951641082764
+        Z: 4.0592193603515625
       Focal Shape Fixed Size: true
       Focal Shape Size: 0.05000000074505806
       Invert Z Axis: false
@@ -304,7 +304,7 @@ Visualization Manager:
       Near Clip Distance: 0.009999999776482582
       Pitch: 1.5697963237762451
       Target Frame: <Fixed Frame>
-      Yaw: 3.128579616546631
+      Yaw: 3.15358304977417
     Saved: ~
 Window Geometry:
   Displays:

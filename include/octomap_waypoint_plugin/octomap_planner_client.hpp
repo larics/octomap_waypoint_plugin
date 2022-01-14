@@ -1,11 +1,14 @@
 #ifndef OCTOMAP_PLANNER_HPP
 #define OCTOMAP_PLANNER_HPP
 
-#include "geometry_msgs/PoseStamped.h"
-#include "geometry_msgs/TransformStamped.h"
-#include "ros/forwards.h"
-#include "ros/service_client.h"
-#include "ros/subscriber.h"
+#include <geometry_msgs/PoseStamped.h>
+#include <geometry_msgs/TransformStamped.h>
+#include <trajectory_msgs/MultiDOFJointTrajectory.h>
+#include <trajectory_msgs/JointTrajectory.h>
+
+#include <ros/forwards.h>
+#include <ros/service_client.h>
+#include <ros/subscriber.h>
 #include <uav_ros_tracker/planner_interface.hpp>
 #include <deque>
 #include <mutex>
@@ -41,7 +44,12 @@ public:
 
 private:
   std::optional<uav_ros_msgs::WaypointPtr> getCurrentWaypoint();
-  double                distanceToCurrentWp(const nav_msgs::Odometry& odom);
+  double                           distanceToCurrentWp(const nav_msgs::Odometry& odom);
+  trajectory_msgs::JointTrajectory planTrajectoryBetween(
+    const trajectory_msgs::JointTrajectoryPoint& start_point,
+    const trajectory_msgs::JointTrajectoryPoint& end_point,
+    const std::string&                           waypoint_frame);
+
   static constexpr auto NAME         = "OctomapPlannerClient";
   static constexpr auto DISTANCE_TOL = 0.5;
 
@@ -50,6 +58,9 @@ private:
 
   ros::Timer m_planning_timer;
   void       plannning_callback(const ros::TimerEvent& e);
+
+  ros::Timer m_visualization_timer;
+  void       visualization_callback(const ros::TimerEvent& e);
 
   geometry_msgs::PoseStamped m_carrot_pose;
   std::mutex                 m_carrot_pose_mutex;
@@ -64,8 +75,12 @@ private:
   std::mutex                            m_waypoint_buffer_mutex;
   std::deque<uav_ros_msgs::WaypointPtr> m_waypoint_buffer;
 
+  std::mutex                                   m_waypoint_trajectory_mutex;
+  std::deque<trajectory_msgs::JointTrajectory> m_waypoint_trajectory_buffer;
+
   ros::ServiceClient m_planner_client;
   ros::Publisher     m_tracker_trajectory_pub;
+  bool               m_plan_and_fly;
 };
 }// namespace uav_ros_tracker
 
