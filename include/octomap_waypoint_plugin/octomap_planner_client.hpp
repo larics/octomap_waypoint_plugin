@@ -15,6 +15,12 @@
 
 namespace uav_ros_tracker {
 
+struct WaypointInfo
+{
+  uav_ros_msgs::WaypointPtr        waypoint;
+  trajectory_msgs::JointTrajectory planned_path;
+};
+
 /**
  * @brief Environment aware planner plugin. Uses
  * https://github.com/larics/larixcs_motion_planning capabailities to plan a
@@ -49,6 +55,7 @@ private:
     const trajectory_msgs::JointTrajectoryPoint& start_point,
     const trajectory_msgs::JointTrajectoryPoint& end_point,
     const std::string&                           waypoint_frame);
+  int plannedPathCount();
 
   static constexpr auto NAME         = "OctomapPlannerClient";
   static constexpr auto DISTANCE_TOL = 0.5;
@@ -72,16 +79,17 @@ private:
   std::unordered_map<std::string, geometry_msgs::TransformStamped> m_transform_map;
   std::string                                                      m_tracking_frame;
 
-  std::mutex                            m_waypoint_buffer_mutex;
-  std::deque<uav_ros_msgs::WaypointPtr> m_waypoint_buffer;
-
-  std::mutex                                   m_waypoint_trajectory_mutex;
-  std::deque<trajectory_msgs::JointTrajectory> m_waypoint_trajectory_buffer;
+  std::mutex               m_waypoint_buffer_mutex;
+  std::deque<WaypointInfo> m_waypoint_buffer;
 
   ros::ServiceClient m_planner_client;
   ros::Publisher     m_tracker_trajectory_pub;
+  ros::Publisher     m_planend_path_pub;
   bool               m_plan_and_fly;
+  std::string        m_last_waypoint_frame;
 };
+
+
 }// namespace uav_ros_tracker
 
 #endif /* OCTOMAP_PLANNER_HPP */

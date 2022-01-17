@@ -22,7 +22,9 @@ void uav_ros_tracker::OctomapPlannerClient::addWaypoint(
   const uav_ros_msgs::Waypoint& waypoint)
 {
   std::lock_guard<std::mutex> lock(m_waypoint_buffer_mutex);
-  m_waypoint_buffer.emplace_back(boost::make_shared<uav_ros_msgs::Waypoint>(waypoint));
+  m_waypoint_buffer.emplace_back(
+    WaypointInfo{ boost::make_shared<uav_ros_msgs::Waypoint>(waypoint),
+                  trajectory_msgs::JointTrajectory{} });
 
   ROS_INFO("[%s] Waypoint Added [%.2f, %.2f, %.2f]",
            NAME,
@@ -44,11 +46,6 @@ void uav_ros_tracker::OctomapPlannerClient::clearWaypoints()
     m_waypoint_buffer.clear();
   }
 
-  {
-    std::lock_guard<std::mutex> lock(m_waypoint_trajectory_mutex);
-    m_waypoint_trajectory_buffer.clear();
-  }
-
   m_is_flying  = false;
   m_is_waiting = false;
 }
@@ -61,7 +58,7 @@ geometry_msgs::PoseArray uav_ros_tracker::OctomapPlannerClient::getWaypointArray
     std::lock_guard<std::mutex> lock(m_waypoint_buffer_mutex);
     for (const auto& waypoint : m_waypoint_buffer) {
       auto transformed_wp =
-        transform_waypoint(*waypoint, m_transform_map, m_tracking_frame);
+        transform_waypoint(*(waypoint.waypoint), m_transform_map, m_tracking_frame);
       poseArray.poses.push_back(transformed_wp.pose.pose);
     }
   }
@@ -81,7 +78,7 @@ std::optional<uav_ros_msgs::WaypointPtr>
 
     auto waypoint = m_waypoint_buffer.front();
     auto transformed_wp =
-      transform_waypoint(*waypoint, m_transform_map, m_tracking_frame);
+      transform_waypoint(*(waypoint.waypoint), m_transform_map, m_tracking_frame);
 
     current_waypoint = std::make_optional<uav_ros_msgs::WaypointPtr>(
       boost::make_shared<uav_ros_msgs::Waypoint>(transformed_wp));
@@ -133,6 +130,8 @@ bool uav_ros_tracker::OctomapPlannerClient::initialize(
     nh.serviceClient<larics_motion_planning::MultiDofTrajectory>("multi_dof_trajectory");
   m_tracker_trajectory_pub =
     nh.advertise<trajectory_msgs::MultiDOFJointTrajectory>("tracker/input_trajectory", 1);
+  m_planend_path_pub =
+    nh.advertise<nav_msgs::Path>("octomap_planner_client/planned_path", 1);
 
   m_waiting_timer = nh.createTimer(ros::Duration(1),
                                    &OctomapPlannerClient::waiting_callback,
@@ -162,8 +161,8 @@ std::tuple<bool, std::string, uav_ros_msgs::WaypointPtr>
   }
 
   // Get the latest waypoint
-  uav_ros_msgs::WaypointPtr current_waypoint_ptr;
-  int                       waypoint_count = 0;
+  WaypointInfo current_waypoint_info;
+  int          waypoint_count = 0;
   {
     std::lock_guard<std::mutex> lock(m_waypoint_buffer_mutex);
 
@@ -173,20 +172,11 @@ std::tuple<bool, std::string, uav_ros_msgs::WaypointPtr>
         false, "No waypoints available.", {});
     }
 
-    waypoint_count       = m_waypoint_buffer.size();
-    current_waypoint_ptr = m_waypoint_buffer.front();
+    waypoint_count        = m_waypoint_buffer.size();
+    current_waypoint_info = m_waypoint_buffer.front();
   }
 
-  {
-    std::lock_guard<std::mutex> lock(m_waypoint_trajectory_mutex);
-    if (waypoint_count < m_waypoint_trajectory_buffer.size()) {
-      ROS_WARN(
-        "Waypoint count: %d is less than planned trajectory count: %d. Something has "
-        "gone wrong! Clearing planned trajectory.");
-    }
-  }
-
-  if (current_waypoint_ptr == nullptr) {
+  if (waypoint_count == 0) {
     return std::make_tuple<bool, std::string, uav_ros_msgs::WaypointPtr>(
       false, "No waypoints available.", {});
   }
@@ -194,23 +184,25 @@ std::tuple<bool, std::string, uav_ros_msgs::WaypointPtr>
   auto distance_to_wp = distanceToCurrentWp(current_odometry);
   // If we are are flying and still haven't reached the distance
   if (m_is_flying && distance_to_wp >= DISTANCE_TOL) {
-    return std::make_tuple(false, "Flying to current waypoint!", current_waypoint_ptr);
+    return std::make_tuple(
+      false, "Flying to current waypoint!", current_waypoint_info.waypoint);
   }
 
   // We have reached the desired waypoint distance, start the waiting
   if (m_is_flying && !m_is_waiting && distance_to_wp < DISTANCE_TOL) {
     m_is_waiting = true;
     m_is_flying  = false;
-    m_waiting_timer.setPeriod(ros::Duration(current_waypoint_ptr->waiting_time), true);
+    m_waiting_timer.setPeriod(ros::Duration(current_waypoint_info.waypoint->waiting_time),
+                              true);
     m_waiting_timer.start();
     return std::make_tuple(
-      false, "Started waiting at the current waypoint!", current_waypoint_ptr);
+      false, "Started waiting at the current waypoint!", current_waypoint_info.waypoint);
   }
 
   // If we are not flying but rather waiting than
   if (m_is_waiting) {
     return std::make_tuple(
-      false, "Waiting at the current waypoint!", current_waypoint_ptr);
+      false, "Waiting at the current waypoint!", current_waypoint_info.waypoint);
   }
 
   // Check if tracker is available
@@ -220,30 +212,28 @@ std::tuple<bool, std::string, uav_ros_msgs::WaypointPtr>
       false, "Tracker is busy!", {});
   }
 
-  trajectory_msgs::JointTrajectory joint_trajectory;
-  {
-    std::lock_guard<std::mutex> lock(m_waypoint_trajectory_mutex);
-    if (m_waypoint_trajectory_buffer.empty()) {
-      return { false, "Trajectory not planned yet!", nullptr };
-    }
+  // Check if trajectory to that waypoint is planned
+  if (current_waypoint_info.planned_path.points.empty()) {
+    return { false, "Trajectory not planned yet!", current_waypoint_info.waypoint };
+  }
 
-    if (!m_plan_and_fly && waypoint_count != m_waypoint_trajectory_buffer.size()) {
+  // If we don't want to plan and fly wait until there is a trajectory to every waypoint
+  if (!m_plan_and_fly) {
+
+    int planned_path_count = plannedPathCount();
+    if (planned_path_count < waypoint_count) {
       return { false,
-               "Planning status " + std::to_string(m_waypoint_trajectory_buffer.size())
-                 + " / " + std::to_string(waypoint_count),
-               nullptr };
+               "Planning status " + std::to_string(planned_path_count) + " / "
+                 + std::to_string(waypoint_count),
+               current_waypoint_info.waypoint };
     }
-    joint_trajectory = m_waypoint_trajectory_buffer.front();
   }
 
-  std::string waypoint_frame;
-  {
-    std::lock_guard<std::mutex> lock(m_waypoint_buffer_mutex);
-    waypoint_frame = m_waypoint_buffer.front()->pose.header.frame_id;
-  }
+  auto        current_trajectory = current_waypoint_info.planned_path;
+  std::string waypoint_frame     = current_waypoint_info.planned_path.header.frame_id;
 
   trajectory_msgs::MultiDOFJointTrajectory tracking_path;
-  for (const auto& path_point : joint_trajectory.points) {
+  for (const auto& path_point : current_trajectory.points) {
 
     // Pack the path point in the waypoint
     uav_ros_msgs::Waypoint map_waypoint;
@@ -279,28 +269,58 @@ std::tuple<bool, std::string, uav_ros_msgs::WaypointPtr>
 
   m_tracker_trajectory_pub.publish(tracking_path);
   m_is_flying = true;
-  return { true, "Planned trajectory published!", current_waypoint_ptr };
+  return { true, "Planned trajectory published!", current_waypoint_info.waypoint };
+}
+
+int uav_ros_tracker::OctomapPlannerClient::plannedPathCount()
+{
+  std::lock_guard<std::mutex> lock(m_waypoint_buffer_mutex);
+  int                         planned_path_count = 0;
+
+  for (const auto& waypoint_info : m_waypoint_buffer) {
+    if (waypoint_info.planned_path.points.empty()) continue;
+    planned_path_count++;
+  }
+  return planned_path_count;
 }
 
 void uav_ros_tracker::OctomapPlannerClient::visualization_callback(
   const ros::TimerEvent& e)
 {
-  std::deque<trajectory_msgs::JointTrajectory> joint_trajectory;
+  std::deque<WaypointInfo> waypoint_buffer;
   {
-    std::lock_guard<std::mutex> lock(m_waypoint_trajectory_mutex);
-    joint_trajectory = m_waypoint_trajectory_buffer;
+    std::lock_guard<std::mutex> lock(m_waypoint_buffer_mutex);
+    waypoint_buffer = m_waypoint_buffer;
   }
+
+  nav_msgs::Path planned_path;
+  planned_path.header.frame_id = m_last_waypoint_frame;
+  planned_path.header.stamp    = ros::Time::now();
+
+  if (!waypoint_buffer.empty()) {
+    planned_path.header.frame_id = waypoint_buffer.front().planned_path.header.frame_id;
+  }
+
+  for (const auto& waypoint_info : waypoint_buffer) {
+    for (const auto& joint_point : waypoint_info.planned_path.points) {
+      geometry_msgs::PoseStamped pose_stamped;
+      pose_stamped.header          = planned_path.header;
+      pose_stamped.pose.position.x = joint_point.positions[0];
+      pose_stamped.pose.position.y = joint_point.positions[1];
+      pose_stamped.pose.position.z = joint_point.positions[2];
+      pose_stamped.pose.orientation =
+        ros_convert::calculate_quaternion(joint_point.positions[3]);
+      planned_path.poses.push_back(pose_stamped);
+    }
+  }
+
+  m_planend_path_pub.publish(planned_path);
 }
 
 void uav_ros_tracker::OctomapPlannerClient::waiting_callback(const ros::TimerEvent& e)
 {
   ROS_INFO("[%s] Waiting at waypoint finished!", NAME);
   m_is_waiting = false;
-
-  {
-    std::lock_guard<std::mutex> lock(m_waypoint_trajectory_mutex);
-    if (!m_waypoint_trajectory_buffer.empty()) m_waypoint_trajectory_buffer.pop_front();
-  }
 
   {
     std::lock_guard<std::mutex> lock(m_waypoint_buffer_mutex);
@@ -330,7 +350,7 @@ void uav_ros_tracker::OctomapPlannerClient::plannning_callback(const ros::TimerE
   }
 
   // Get the current waypoint
-  std::deque<uav_ros_msgs::WaypointPtr> waypoint_buffer_copy;
+  std::deque<WaypointInfo> waypoint_buffer_copy;
   {
     std::lock_guard<std::mutex> lock(m_waypoint_buffer_mutex);
     if (m_waypoint_buffer.empty()) {
@@ -341,19 +361,25 @@ void uav_ros_tracker::OctomapPlannerClient::plannning_callback(const ros::TimerE
     waypoint_buffer_copy = m_waypoint_buffer;
   }
 
+  int planned_trajectory_count = plannedPathCount();
+  if (planned_trajectory_count == waypoint_buffer_copy.size()) {
+    ROS_WARN_THROTTLE(2.0, "[%s::planning_callback] All waypoints are planned!", NAME);
+    return;
+  }
+
   // Transform carrot pose
-  auto waypoint_frame = waypoint_buffer_copy.front()->pose.header.frame_id;
-  if (m_transform_map.count(waypoint_frame) == 0) {
+  m_last_waypoint_frame = waypoint_buffer_copy.front().waypoint->pose.header.frame_id;
+  if (m_transform_map.count(m_last_waypoint_frame) == 0) {
     ROS_FATAL_THROTTLE(2.0,
                        "[%s::plannning_callback] waypoint frame %s unrecognized",
                        NAME,
-                       waypoint_frame.c_str());
+                       m_last_waypoint_frame.c_str());
     return;
   }
 
   // Carrot pose is in the current tracking frame
   // Transform it to the waypoint frame to figure out where to start planning
-  const auto     waypoint_to_tracking = m_transform_map.at(waypoint_frame);
+  const auto     waypoint_to_tracking = m_transform_map.at(m_last_waypoint_frame);
   tf2::Transform waypoint_to_tracking_transform;
   tf2::fromMsg(waypoint_to_tracking.transform, waypoint_to_tracking_transform);
   const auto tracking_to_waypoint_transform = waypoint_to_tracking_transform.inverse();
@@ -369,75 +395,70 @@ void uav_ros_tracker::OctomapPlannerClient::plannning_callback(const ros::TimerE
     current_carrot_pose, transformed_carrot_pose, tracking_to_waypoint_stamped);
 
   // Check if we should start planning from carrot/pose
-  bool empty_trajectory_buffer  = false;
-  int  planned_trajectory_count = 0;
-  {
-    std::lock_guard<std::mutex> lock(m_waypoint_trajectory_mutex);
-    if (m_waypoint_trajectory_buffer.empty()) { empty_trajectory_buffer = true; }
-    planned_trajectory_count = m_waypoint_trajectory_buffer.size();
-  }
-
-  std::vector<trajectory_msgs::JointTrajectoryPoint> unplanned_points;
-  trajectory_msgs::JointTrajectoryPoint              start_point;
-
-  // If trajectory buffer is empty start point is the carrot point
-  if (empty_trajectory_buffer) {
-    // Pack the carrot point to JointTrajectoryPoint
-    start_point.positions =
-      std::vector<double>{ transformed_carrot_pose.pose.position.x,
-                           transformed_carrot_pose.pose.position.y,
-                           transformed_carrot_pose.pose.position.z,
-                           ros_convert::calculateYaw(
-                             transformed_carrot_pose.pose.orientation.x,
-                             transformed_carrot_pose.pose.orientation.y,
-                             transformed_carrot_pose.pose.orientation.z,
-                             transformed_carrot_pose.pose.orientation.w) };
-  } else {
-    // Otherwise start points is the last planned waypoint
-    start_point.positions = std::vector<double>{
-      waypoint_buffer_copy.at(planned_trajectory_count - 1)->pose.pose.position.x,
-      waypoint_buffer_copy.at(planned_trajectory_count - 1)->pose.pose.position.y,
-      waypoint_buffer_copy.at(planned_trajectory_count - 1)->pose.pose.position.z,
-      ros_convert::calculateYaw(
-        waypoint_buffer_copy.at(planned_trajectory_count - 1)->pose.pose.orientation.x,
-        waypoint_buffer_copy.at(planned_trajectory_count - 1)->pose.pose.orientation.y,
-        waypoint_buffer_copy.at(planned_trajectory_count - 1)->pose.pose.orientation.z,
-        waypoint_buffer_copy.at(planned_trajectory_count - 1)->pose.pose.orientation.w)
-    };
-  }
-
-  for (int i = planned_trajectory_count; i < waypoint_buffer_copy.size(); i++) {
-    trajectory_msgs::JointTrajectoryPoint point;
-    point.positions =
-      std::vector<double>{ waypoint_buffer_copy[i]->pose.pose.position.x,
-                           waypoint_buffer_copy[i]->pose.pose.position.y,
-                           waypoint_buffer_copy[i]->pose.pose.position.z,
-                           ros_convert::calculateYaw(
-                             waypoint_buffer_copy[i]->pose.pose.orientation.x,
-                             waypoint_buffer_copy[i]->pose.pose.orientation.y,
-                             waypoint_buffer_copy[i]->pose.pose.orientation.z,
-                             waypoint_buffer_copy[i]->pose.pose.orientation.w) };
-    ROS_INFO_STREAM("Add point: " << point << "\n to unplanned_points!");
-    unplanned_points.push_back(point);
-  }
+  bool empty_trajectory_buffer = planned_trajectory_count == 0;
 
   // Plan trajectories
-  for (int i = 0; i < unplanned_points.size(); i++) {
-    trajectory_msgs::JointTrajectoryPoint first_point;
-    trajectory_msgs::JointTrajectoryPoint end_point = unplanned_points[i];
+  for (int i = 0; i < waypoint_buffer_copy.size(); i++) {
 
-    // For first point either take previous unplanned or start_point
-    if (i == 0) {
-      first_point = start_point;
-    } else {
-      first_point = unplanned_points[i - 1];
+    // Check if waypoint is already planned
+    if (!waypoint_buffer_copy[i].planned_path.points.empty()) {
+      ROS_INFO("[planning_loop] Skipping waypoing at index %d", i);
+      continue;
     }
 
-    auto planned_points = planTrajectoryBetween(first_point, end_point, waypoint_frame);
-    planned_points.header.frame_id = waypoint_frame;
+    trajectory_msgs::JointTrajectoryPoint start_point;
+    if (i == 0) {
+      // If the first waypoint is not planned, plan it from the current carrot point
+      start_point.positions =
+        std::vector<double>{ transformed_carrot_pose.pose.position.x,
+                             transformed_carrot_pose.pose.position.y,
+                             transformed_carrot_pose.pose.position.z,
+                             ros_convert::calculateYaw(
+                               transformed_carrot_pose.pose.orientation.x,
+                               transformed_carrot_pose.pose.orientation.y,
+                               transformed_carrot_pose.pose.orientation.z,
+                               transformed_carrot_pose.pose.orientation.w) };
+    } else {
+      const auto previous_waypoint = *waypoint_buffer_copy[i - 1].waypoint;
+      start_point.positions =
+        std::vector<double>{ previous_waypoint.pose.pose.position.x,
+                             previous_waypoint.pose.pose.position.y,
+                             previous_waypoint.pose.pose.position.z,
+                             ros_convert::calculateYaw(
+                               previous_waypoint.pose.pose.orientation.x,
+                               previous_waypoint.pose.pose.orientation.y,
+                               previous_waypoint.pose.pose.orientation.z,
+                               previous_waypoint.pose.pose.orientation.w) };
+    }
+
+    const auto current_waypoint = *waypoint_buffer_copy[i].waypoint;
+    trajectory_msgs::JointTrajectoryPoint end_point;
+    end_point.positions =
+      std::vector<double>{ current_waypoint.pose.pose.position.x,
+                           current_waypoint.pose.pose.position.y,
+                           current_waypoint.pose.pose.position.z,
+                           ros_convert::calculateYaw(
+                             current_waypoint.pose.pose.orientation.x,
+                             current_waypoint.pose.pose.orientation.y,
+                             current_waypoint.pose.pose.orientation.z,
+                             current_waypoint.pose.pose.orientation.w) };
+
+    auto planned_points =
+      planTrajectoryBetween(start_point, end_point, m_last_waypoint_frame);
+    planned_points.header.frame_id = m_last_waypoint_frame;
+    planned_points.header.stamp    = ros::Time::now();
+    if (planned_points.points.empty()) {
+      ROS_FATAL("[planning_loop] Planning failed from %d to %d", i - 1, i);
+      continue;
+    }
+
     {
-      std::lock_guard<std::mutex> lock(m_waypoint_trajectory_mutex);
-      m_waypoint_trajectory_buffer.push_back(planned_points);
+      // TODO: Check if the i-th waypoint was cleared meanwhile
+      // TODO: Check if different points is added in place of the i-th waypoint
+      
+      // Copy the planned points to the trajectory
+      std::lock_guard<std::mutex> lock(m_waypoint_buffer_mutex);
+      m_waypoint_buffer[i].planned_path = planned_points;
     }
   }
 }

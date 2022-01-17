@@ -14,7 +14,9 @@ Panels:
         - /PoseArray2
         - /Pose1
         - /OccupancyGrid1
-      Splitter Ratio: 0.6852940917015076
+        - /Path2
+        - /Path2/Status1
+      Splitter Ratio: 0.628654956817627
     Tree Height: 809
   - Class: rviz/Selection
     Name: Selection
@@ -258,6 +260,30 @@ Visualization Manager:
       Voxel Alpha: 0.30000001192092896
       Voxel Coloring: Z-Axis
       Voxel Rendering: Occupied Voxels
+    - Alpha: 1
+      Buffer Length: 1
+      Class: rviz/Path
+      Color: 255; 0; 0
+      Enabled: true
+      Head Diameter: 0.30000001192092896
+      Head Length: 0.20000000298023224
+      Length: 0.30000001192092896
+      Line Style: Lines
+      Line Width: 0.029999999329447746
+      Name: Path
+      Offset:
+        X: 0
+        Y: 0
+        Z: 0
+      Pose Color: 255; 85; 255
+      Pose Style: None
+      Queue Size: 10
+      Radius: 0.029999999329447746
+      Shaft Diameter: 0.10000000149011612
+      Shaft Length: 0.10000000149011612
+      Topic: /red/octomap_planner_client/planned_path
+      Unreliable: false
+      Value: true
   Enabled: true
   Global Options:
     Background Color: 48; 48; 48
@@ -286,7 +312,7 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz/Orbit
-      Distance: 38.92979431152344
+      Distance: 39.3917236328125
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
@@ -304,7 +330,7 @@ Visualization Manager:
       Near Clip Distance: 0.009999999776482582
       Pitch: 1.5697963237762451
       Target Frame: <Fixed Frame>
-      Yaw: 3.15358304977417
+      Yaw: 3.1585750579833984
     Saved: ~
 Window Geometry:
   Displays:
