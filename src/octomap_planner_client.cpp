@@ -46,9 +46,6 @@ void uav_ros_tracker::OctomapPlannerClient::clearWaypoints()
     std::lock_guard<std::mutex> lock(m_waypoint_buffer_mutex);
     m_waypoint_buffer.clear();
   }
-
-  m_is_flying  = false;
-  m_is_waiting = false;
 }
 
 geometry_msgs::PoseArray uav_ros_tracker::OctomapPlannerClient::getWaypointArray()
@@ -196,6 +193,13 @@ std::tuple<bool, std::string, uav_ros_msgs::WaypointPtr>
       false, "No waypoints available.", {});
   }
 
+  // Flying to a waypoint that was cleared
+  if (tracking_enabled && m_is_flying
+      && current_waypoint_info.waypoint_id != m_waiting_id) {
+    ROS_FATAL("Current waypoint changed!");
+    if (tracking_enabled) { m_is_flying = false; }
+  }
+
   auto distance_to_wp = distanceToCurrentWp(current_odometry);
   // If we are are flying and still haven't reached the distance
   if (m_is_flying && distance_to_wp >= DISTANCE_TOL) {
@@ -253,18 +257,18 @@ std::tuple<bool, std::string, uav_ros_msgs::WaypointPtr>
     transform_map_copy = m_transform_map;
   }
 
-  // If there are only 2 points in the planned path, skip the first one and only send the last
+  // If there are only 2 points in the planned path, skip the first one and only send the
+  // last
   bool skip_first_point = current_trajectory.points.size() == 2;
 
   trajectory_msgs::MultiDOFJointTrajectory tracking_path;
   for (const auto& path_point : current_trajectory.points) {
 
-    if(skip_first_point)
-    {
+    if (skip_first_point) {
       skip_first_point = false;
       continue;
     }
-    
+
     // Pack the path point in the waypoint
     uav_ros_msgs::Waypoint map_waypoint;
     map_waypoint.pose.header.frame_id = waypoint_frame;
@@ -297,6 +301,7 @@ std::tuple<bool, std::string, uav_ros_msgs::WaypointPtr>
     tracking_path.points.push_back(tracking_point);
   }
 
+  m_waiting_id = current_waypoint_info.waypoint_id;
   m_tracker_trajectory_pub.publish(tracking_path);
   m_is_flying = true;
   return { true, "Planned trajectory published!", current_waypoint_info.waypoint };
@@ -362,7 +367,22 @@ void uav_ros_tracker::OctomapPlannerClient::waiting_callback(const ros::TimerEve
 
   {
     std::lock_guard<std::mutex> lock(m_waypoint_buffer_mutex);
-    if (!m_waypoint_buffer.empty()) m_waypoint_buffer.pop_front();
+    if (m_waypoint_buffer.empty()) {
+      ROS_WARN(
+        "[waiting_callback] Waiting at waypoint %d finished but waypoints were cleared "
+        "in the meantime.",
+        m_waiting_id);
+      return;
+    }
+
+    if (m_waypoint_buffer.front().waypoint_id == m_waiting_id) {
+      m_waypoint_buffer.pop_front();
+    } else {
+      ROS_WARN(
+        "[waiting_callback] Not poping waypoint from buffer. It was changed while "
+        "waiting.");
+      return;
+    }
   }
 }
 
@@ -406,6 +426,14 @@ void uav_ros_tracker::OctomapPlannerClient::plannning_callback(const ros::TimerE
   }
 
   int planned_trajectory_count = plannedPathCount();
+  if (m_is_flying && planned_trajectory_count == 0) {
+    ROS_WARN_THROTTLE(2.0,
+                      "[%s::planning_callback] Not planning while flying and no other "
+                      "trajectories are available!",
+                      NAME);
+    return;
+  }
+
   if (planned_trajectory_count == waypoint_buffer_copy.size()) {
     ROS_WARN_THROTTLE(2.0, "[%s::planning_callback] All waypoints are planned!", NAME);
     return;

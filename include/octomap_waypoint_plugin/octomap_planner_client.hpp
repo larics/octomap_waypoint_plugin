@@ -77,8 +77,9 @@ private:
   ros::Subscriber            m_carrot_pose_sub;
   void                       carrot_pose_cb(const geometry_msgs::PoseStamped& pose);
 
-  bool m_is_flying  = false;
-  bool m_is_waiting = false;
+  std::atomic<bool> m_is_flying  = false;
+  std::atomic<bool> m_is_waiting = false;
+  int  m_waiting_id = -1;
 
   std::mutex                                                       m_transform_map_mutex;
   std::unordered_map<std::string, geometry_msgs::TransformStamped> m_transform_map;
