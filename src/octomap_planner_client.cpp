@@ -23,7 +23,8 @@ void uav_ros_tracker::OctomapPlannerClient::addWaypoint(
 {
   std::lock_guard<std::mutex> lock(m_waypoint_buffer_mutex);
   m_waypoint_buffer.emplace_back(
-    WaypointInfo{ boost::make_shared<uav_ros_msgs::Waypoint>(waypoint),
+    WaypointInfo{ m_waypoint_id_counter++,
+                  boost::make_shared<uav_ros_msgs::Waypoint>(waypoint),
                   trajectory_msgs::JointTrajectory{} });
 
   ROS_INFO("[%s] Waypoint Added [%.2f, %.2f, %.2f]",
@@ -453,11 +454,23 @@ void uav_ros_tracker::OctomapPlannerClient::plannning_callback(const ros::TimerE
     }
 
     {
-      // TODO: Check if the i-th waypoint was cleared meanwhile
-      // TODO: Check if different points is added in place of the i-th waypoint
-      
       // Copy the planned points to the trajectory
       std::lock_guard<std::mutex> lock(m_waypoint_buffer_mutex);
+
+      if (m_waypoint_buffer.size() < i + 1) {
+        ROS_FATAL(
+          "[planning_loop] Waypoint buffer size changed while planning. Planning "
+          "aborted!");
+        return;
+      }
+
+      if (m_waypoint_buffer[i].waypoint_id != waypoint_buffer_copy[i].waypoint_id) {
+        ROS_FATAL(
+          "[planning_loop] Waypoint ID changed while path planning. Planning aborted!");
+        return;
+      }
+
+      // Save the planned path if all is well
       m_waypoint_buffer[i].planned_path = planned_points;
     }
   }

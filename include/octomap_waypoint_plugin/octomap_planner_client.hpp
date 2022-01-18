@@ -17,6 +17,7 @@ namespace uav_ros_tracker {
 
 struct WaypointInfo
 {
+  int                              waypoint_id;
   uav_ros_msgs::WaypointPtr        waypoint;
   trajectory_msgs::JointTrajectory planned_path;
 };
@@ -87,6 +88,7 @@ private:
   ros::Publisher     m_planend_path_pub;
   bool               m_plan_and_fly;
   std::string        m_last_waypoint_frame;
+  int                m_waypoint_id_counter = 1;
 };
 
 
