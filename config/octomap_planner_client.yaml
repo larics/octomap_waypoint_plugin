@@ -1,2 +1,3 @@
 octomap_planner_client:
-  plan_and_fly: false
+  plan_and_fly: true
+  refresh_transforms: true

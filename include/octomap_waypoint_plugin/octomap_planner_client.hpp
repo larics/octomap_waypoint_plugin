@@ -37,6 +37,8 @@ public:
 
   geometry_msgs::PoseArray     getWaypointArray() override;
   uav_ros_msgs::WaypointStatus getWaypointStatus(const nav_msgs::Odometry& odom) override;
+  void                         updateTransformMap(
+                            std::unordered_map<std::string, geometry_msgs::TransformStamped> transform_map);
 
   bool initialize(
     ros::NodeHandle&                                                 nh,
@@ -75,10 +77,13 @@ private:
   ros::Subscriber            m_carrot_pose_sub;
   void                       carrot_pose_cb(const geometry_msgs::PoseStamped& pose);
 
-  bool                                                             m_is_flying  = false;
-  bool                                                             m_is_waiting = false;
+  bool m_is_flying  = false;
+  bool m_is_waiting = false;
+
+  std::mutex                                                       m_transform_map_mutex;
   std::unordered_map<std::string, geometry_msgs::TransformStamped> m_transform_map;
   std::string                                                      m_tracking_frame;
+  bool m_refresh_transform_map = false;
 
   std::mutex               m_waypoint_buffer_mutex;
   std::deque<WaypointInfo> m_waypoint_buffer;
