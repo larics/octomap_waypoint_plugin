@@ -14,6 +14,7 @@
 #include <mutex>
 #include <octomap_waypoint_plugin/octomap_planner_client.hpp>
 #include <larics_motion_planning/MultiDofTrajectory.h>
+#include <larics_motion_planning/CheckStateValidity.h>
 #include <trajectory_msgs/MultiDOFJointTrajectory.h>
 #include <uav_ros_lib/ros_convert.hpp>
 #include <uav_ros_lib/param_util.hpp>
@@ -140,6 +141,8 @@ bool uav_ros_tracker::OctomapPlannerClient::initialize(
     nh.subscribe("carrot/pose", 1, &OctomapPlannerClient::carrot_pose_cb, this);
   m_planner_client =
     nh.serviceClient<larics_motion_planning::MultiDofTrajectory>("multi_dof_trajectory");
+  m_trajectory_checker_client =
+    nh.serviceClient<larics_motion_planning::CheckStateValidity>("validity_checker");
   m_tracker_trajectory_pub =
     nh.advertise<trajectory_msgs::MultiDOFJointTrajectory>("tracker/input_trajectory", 1);
   m_planend_path_pub =
@@ -155,6 +158,8 @@ bool uav_ros_tracker::OctomapPlannerClient::initialize(
     nh.createTimer(ros::Duration(0.1), &OctomapPlannerClient::plannning_callback, this);
   m_visualization_timer =
     nh.createTimer(ros::Duration(1), &OctomapPlannerClient::visualization_callback, this);
+  m_trajectory_checker_timer = nh.createTimer(
+    ros::Duration(0.1), &OctomapPlannerClient::trajectory_checker_callback, this);
 
   return true;
 }
@@ -358,6 +363,47 @@ void uav_ros_tracker::OctomapPlannerClient::visualization_callback(
   }
 
   m_planend_path_pub.publish(planned_path);
+}
+
+void uav_ros_tracker::OctomapPlannerClient::trajectory_checker_callback(
+  const ros::TimerEvent& e)
+{
+  if (!m_trajectory_checker_client.exists()) {
+    ROS_WARN_THROTTLE(
+      2.0, "[%s::trajectory_checker_callback] Checker service is missing!", NAME);
+    return;
+  }
+
+  std::deque<WaypointInfo> waypoint_buffer_copy;
+  {
+    std::lock_guard<std::mutex> lock(m_waypoint_buffer_mutex);
+    waypoint_buffer_copy = m_waypoint_buffer;
+  }
+
+  for (const auto& waypoint_info : waypoint_buffer_copy) {
+
+    if (waypoint_info.planned_path.points.empty()) {
+      continue;
+    }
+
+    larics_motion_planning::CheckStateValidity state_validity;
+    state_validity.request.points = waypoint_info.planned_path;
+
+    auto call_success = m_trajectory_checker_client.call(state_validity);
+    if (!call_success) {
+      ROS_FATAL("[%s::trajectory_checker_callback] call failed for trajectory id %d",
+                NAME,
+                waypoint_info.waypoint_id);
+      continue;
+    }
+
+    if (state_validity.response.valid) { continue; }
+    ROS_FATAL("[%s::trajectory_checker_callback] Collision detected at trajectory id %d",
+              NAME,
+              waypoint_info.waypoint_id);
+    
+    // TODO: Do something if colision is detected
+  }
 }
 
 void uav_ros_tracker::OctomapPlannerClient::waiting_callback(const ros::TimerEvent& e)

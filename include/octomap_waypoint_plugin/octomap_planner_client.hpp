@@ -72,6 +72,9 @@ private:
   ros::Timer m_visualization_timer;
   void       visualization_callback(const ros::TimerEvent& e);
 
+  ros::Timer m_trajectory_checker_timer;
+  void       trajectory_checker_callback(const ros::TimerEvent& e);
+
   geometry_msgs::PoseStamped m_carrot_pose;
   std::mutex                 m_carrot_pose_mutex;
   ros::Subscriber            m_carrot_pose_sub;
@@ -79,7 +82,7 @@ private:
 
   std::atomic<bool> m_is_flying  = false;
   std::atomic<bool> m_is_waiting = false;
-  int  m_waiting_id = -1;
+  int               m_waiting_id = -1;
 
   std::mutex                                                       m_transform_map_mutex;
   std::unordered_map<std::string, geometry_msgs::TransformStamped> m_transform_map;
@@ -89,6 +92,7 @@ private:
   std::mutex               m_waypoint_buffer_mutex;
   std::deque<WaypointInfo> m_waypoint_buffer;
 
+  ros::ServiceClient m_trajectory_checker_client;
   ros::ServiceClient m_planner_client;
   ros::Publisher     m_tracker_trajectory_pub;
   ros::Publisher     m_planend_path_pub;
