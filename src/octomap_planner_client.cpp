@@ -277,33 +277,13 @@ std::tuple<bool, std::string, uav_ros_msgs::WaypointPtr>
     // Pack the path point in the waypoint
     uav_ros_msgs::Waypoint map_waypoint;
     map_waypoint.pose.header.frame_id = waypoint_frame;
-    map_waypoint.pose.pose.position.x = path_point.positions[0];
-    map_waypoint.pose.pose.position.y = path_point.positions[1];
-    map_waypoint.pose.pose.position.z = path_point.positions[2];
-    map_waypoint.pose.pose.orientation =
-      ros_convert::calculate_quaternion(path_point.positions[3]);
+    map_waypoint.pose.pose = ros_convert::joint_trajectory_point_to_pose(path_point);
 
     auto tracking_waypoint =
       transform_waypoint(map_waypoint, transform_map_copy, m_tracking_frame);
 
-    // construct the tracking trajectory point
-    trajectory_msgs::MultiDOFJointTrajectoryPoint tracking_point;
-    tracking_point.transforms = std::vector<geometry_msgs::Transform>(1);
-    tracking_point.transforms.front().translation.x =
-      tracking_waypoint.pose.pose.position.x;
-    tracking_point.transforms.front().translation.y =
-      tracking_waypoint.pose.pose.position.y;
-    tracking_point.transforms.front().translation.z =
-      tracking_waypoint.pose.pose.position.z;
-    tracking_point.transforms.front().rotation.x =
-      tracking_waypoint.pose.pose.orientation.x;
-    tracking_point.transforms.front().rotation.y =
-      tracking_waypoint.pose.pose.orientation.y;
-    tracking_point.transforms.front().rotation.z =
-      tracking_waypoint.pose.pose.orientation.z;
-    tracking_point.transforms.front().rotation.w =
-      tracking_waypoint.pose.pose.orientation.w;
-    tracking_path.points.push_back(tracking_point);
+    tracking_path.points.push_back(
+      ros_convert::to_trajectory_point(tracking_waypoint.pose.pose));
   }
 
   m_waiting_id = current_waypoint_info.waypoint_id;
@@ -326,7 +306,7 @@ int uav_ros_tracker::OctomapPlannerClient::plannedPathCount()
   int                         planned_path_count = 0;
 
   for (const auto& waypoint_info : m_waypoint_buffer) {
-    if (waypoint_info.planned_path.points.empty()) continue;
+    if (waypoint_info.planned_path.points.empty()) { continue; }
     planned_path_count++;
   }
   return planned_path_count;
@@ -352,12 +332,8 @@ void uav_ros_tracker::OctomapPlannerClient::visualization_callback(
   for (const auto& waypoint_info : waypoint_buffer) {
     for (const auto& joint_point : waypoint_info.planned_path.points) {
       geometry_msgs::PoseStamped pose_stamped;
-      pose_stamped.header          = planned_path.header;
-      pose_stamped.pose.position.x = joint_point.positions[0];
-      pose_stamped.pose.position.y = joint_point.positions[1];
-      pose_stamped.pose.position.z = joint_point.positions[2];
-      pose_stamped.pose.orientation =
-        ros_convert::calculate_quaternion(joint_point.positions[3]);
+      pose_stamped.header = planned_path.header;
+      pose_stamped.pose   = ros_convert::joint_trajectory_point_to_pose(joint_point);
       planned_path.poses.push_back(pose_stamped);
     }
   }
@@ -382,10 +358,8 @@ void uav_ros_tracker::OctomapPlannerClient::trajectory_checker_callback(
 
   for (const auto& waypoint_info : waypoint_buffer_copy) {
 
-    if (waypoint_info.planned_path.points.empty()) {
-      continue;
-    }
-
+    if (waypoint_info.planned_path.points.empty()) { continue; }
+    
     larics_motion_planning::CheckStateValidity state_validity;
     state_validity.request.points = waypoint_info.planned_path;
 
@@ -401,7 +375,7 @@ void uav_ros_tracker::OctomapPlannerClient::trajectory_checker_callback(
     ROS_FATAL("[%s::trajectory_checker_callback] Collision detected at trajectory id %d",
               NAME,
               waypoint_info.waypoint_id);
-    
+
     // TODO: Do something if colision is detected
   }
 }
@@ -527,39 +501,17 @@ void uav_ros_tracker::OctomapPlannerClient::plannning_callback(const ros::TimerE
     trajectory_msgs::JointTrajectoryPoint start_point;
     if (i == 0) {
       // If the first waypoint is not planned, plan it from the current carrot point
-      start_point.positions =
-        std::vector<double>{ transformed_carrot_pose.pose.position.x,
-                             transformed_carrot_pose.pose.position.y,
-                             transformed_carrot_pose.pose.position.z,
-                             ros_convert::calculateYaw(
-                               transformed_carrot_pose.pose.orientation.x,
-                               transformed_carrot_pose.pose.orientation.y,
-                               transformed_carrot_pose.pose.orientation.z,
-                               transformed_carrot_pose.pose.orientation.w) };
+      start_point =
+        ros_convert::pose_to_joint_trajectory_point(transformed_carrot_pose.pose);
     } else {
       const auto previous_waypoint = *waypoint_buffer_copy[i - 1].waypoint;
-      start_point.positions =
-        std::vector<double>{ previous_waypoint.pose.pose.position.x,
-                             previous_waypoint.pose.pose.position.y,
-                             previous_waypoint.pose.pose.position.z,
-                             ros_convert::calculateYaw(
-                               previous_waypoint.pose.pose.orientation.x,
-                               previous_waypoint.pose.pose.orientation.y,
-                               previous_waypoint.pose.pose.orientation.z,
-                               previous_waypoint.pose.pose.orientation.w) };
+      start_point =
+        ros_convert::pose_to_joint_trajectory_point(previous_waypoint.pose.pose);
     }
 
     const auto current_waypoint = *waypoint_buffer_copy[i].waypoint;
-    trajectory_msgs::JointTrajectoryPoint end_point;
-    end_point.positions =
-      std::vector<double>{ current_waypoint.pose.pose.position.x,
-                           current_waypoint.pose.pose.position.y,
-                           current_waypoint.pose.pose.position.z,
-                           ros_convert::calculateYaw(
-                             current_waypoint.pose.pose.orientation.x,
-                             current_waypoint.pose.pose.orientation.y,
-                             current_waypoint.pose.pose.orientation.z,
-                             current_waypoint.pose.pose.orientation.w) };
+    trajectory_msgs::JointTrajectoryPoint end_point =
+      ros_convert::pose_to_joint_trajectory_point(current_waypoint.pose.pose);
 
     auto planned_points =
       planTrajectoryBetween(start_point, end_point, m_last_waypoint_frame);
