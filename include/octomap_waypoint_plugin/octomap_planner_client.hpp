@@ -82,18 +82,19 @@ private:
 
   std::atomic<bool> m_is_flying  = false;
   std::atomic<bool> m_is_waiting = false;
-  int               m_waiting_id = -1;
+  std::atomic<int>  m_flying_id{ -1 };
 
   std::mutex                                                       m_transform_map_mutex;
   std::unordered_map<std::string, geometry_msgs::TransformStamped> m_transform_map;
   std::string                                                      m_tracking_frame;
   bool m_refresh_transform_map = false;
 
-  std::mutex               m_waypoint_buffer_mutex;
-  std::deque<WaypointInfo> m_waypoint_buffer;
+  std::mutex                  m_waypoint_buffer_mutex;
+  std::map<int, WaypointInfo> m_waypoint_buffer;
 
   ros::ServiceClient m_trajectory_checker_client;
   ros::ServiceClient m_planner_client;
+  ros::ServiceClient m_tracker_reset_client;
   ros::Publisher     m_tracker_trajectory_pub;
   ros::Publisher     m_planend_path_pub;
   bool               m_plan_and_fly;
