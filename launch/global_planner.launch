@@ -6,7 +6,7 @@
   <arg name="frame_id"              default="world" />
 
   <!-- Global planner for the UAV -->
-  <node name="global_planner" pkg="larics_motion_planning" type="global_planner_node" output="screen" ns="$(arg namespace)" launch-prefix="debug_roslaunch">
+  <node name="global_planner" pkg="larics_motion_planning" type="global_planner_node" output="screen" ns="$(arg namespace)">
     <param name="rate"                        value="$(arg global_planner_rate)" />
     <param name="global_planner_config_file"  value="$(arg config_file)" />
     <param name="state_scale"                 value="0.05" />
