@@ -36,7 +36,7 @@ sources:
 sources_locked:
   - repo: https://github.com/larics/larics_motion_planning.git
     name: larics_motion_planning
-    rev: 1dc51af2f6470eda6cb851833d080db58df34216
+    rev: bca35a79cdab244462dd539d715886193e65dcfe
     type: git
     sparse_paths:
       -
@@ -58,7 +58,7 @@ sources_locked:
       - git submodule update --init --recursive
   - repo: https://github.com/larics/aerial_manipulators.git
     name: aerial_manipulators
-    rev: a77c9fd70a07be42d59de6b4a9b318ea3bea02ee
+    rev: 54afe039082c1c3847d53cb90a089c6c9376f2ee
     type: git
     sparse_paths:
       -
