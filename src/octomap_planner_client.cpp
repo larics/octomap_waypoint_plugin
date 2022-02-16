@@ -137,6 +137,8 @@ bool uav_ros_tracker::OctomapPlannerClient::initialize(
     nh_private, "octomap_planner_client/plan_and_fly", m_plan_and_fly);
   param_util::getParamOrThrow(
     nh_private, "octomap_planner_client/refresh_transforms", m_refresh_transform_map);
+  param_util::getParamOrThrow(
+    nh_private, "octomap_planner_client/enable_replanning", m_enable_replanning);
 
   m_tracking_frame = std::move(tracking_frame);
   m_transform_map  = std::move(transform_map);
@@ -383,6 +385,11 @@ void uav_ros_tracker::OctomapPlannerClient::trajectory_checker_callback(
     ROS_FATAL("[%s::trajectory_checker_callback] Collision detected at trajectory id %d",
               NAME,
               wp_pair.second.waypoint_id);
+
+    if (!m_enable_replanning) { 
+      ROS_WARN_THROTTLE(2.0, "[%s::trajectory_checker_callback] Replanning disabled.");
+      continue;
+    }
 
     // TODO: Do something (smart!) if colision is detected
     {

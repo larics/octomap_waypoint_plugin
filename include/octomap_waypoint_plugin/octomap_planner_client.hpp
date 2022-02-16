@@ -98,6 +98,7 @@ private:
   ros::Publisher     m_tracker_trajectory_pub;
   ros::Publisher     m_planend_path_pub;
   bool               m_plan_and_fly;
+  bool               m_enable_replanning;
   std::string        m_last_waypoint_frame;
   int                m_waypoint_id_counter = 1;
 };
