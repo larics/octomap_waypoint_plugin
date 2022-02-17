@@ -403,9 +403,6 @@ void uav_ros_tracker::OctomapPlannerClient::trajectory_checker_callback(
         continue;
       }
 
-      m_waypoint_buffer.at(wp_pair.second.waypoint_id).planned_path =
-        trajectory_msgs::JointTrajectory{};
-
       // TODO: Figure out if we passed the collision point or not, no need to stop
       // trajectory if we are passed the collision point and still airborne :D
       int flying_id_copy = m_flying_id.load(std::memory_order_relaxed);
@@ -423,6 +420,14 @@ void uav_ros_tracker::OctomapPlannerClient::trajectory_checker_callback(
           continue;
         }
       }
+
+      if (m_is_waiting && flying_id_copy == wp_pair.second.waypoint_id) {
+        ROS_WARN("Collision detected on a trajectory, while waiting at the last point.");
+        continue;
+      }
+
+      m_waypoint_buffer.at(wp_pair.second.waypoint_id).planned_path =
+        trajectory_msgs::JointTrajectory{};
     }
   }
 }
