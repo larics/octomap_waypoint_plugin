@@ -386,7 +386,7 @@ void uav_ros_tracker::OctomapPlannerClient::trajectory_checker_callback(
               NAME,
               wp_pair.second.waypoint_id);
 
-    if (!m_enable_replanning) { 
+    if (!m_enable_replanning) {
       ROS_WARN_THROTTLE(2.0, "[%s::trajectory_checker_callback] Replanning disabled.");
       continue;
     }
@@ -435,9 +435,8 @@ void uav_ros_tracker::OctomapPlannerClient::trajectory_checker_callback(
 void uav_ros_tracker::OctomapPlannerClient::waiting_callback(const ros::TimerEvent& e)
 {
   ROS_INFO("[%s] Waiting at waypoint finished!", NAME);
-  m_is_waiting = false;
-
   int flying_id_copy = m_flying_id.load(std::memory_order_relaxed);
+
   {
     std::lock_guard<std::mutex> lock(m_waypoint_buffer_mutex);
     if (m_waypoint_buffer.empty()) {
@@ -445,18 +444,19 @@ void uav_ros_tracker::OctomapPlannerClient::waiting_callback(const ros::TimerEve
         "[waiting_callback] Waiting at waypoint %d finished but waypoints were cleared "
         "in the meantime.",
         flying_id_copy);
-      return;
-    }
-
-    if (m_waypoint_buffer.count(flying_id_copy) > 0) {
+    } else if (m_waypoint_buffer.count(flying_id_copy) > 0) {
       m_waypoint_buffer.erase(flying_id_copy);
     } else {
       ROS_WARN(
         "[waiting_callback] Not poping waypoint from buffer. It was changed while "
         "waiting.");
-      return;
     }
   }
+
+  m_flying_id.store(-1, std::memory_order_relaxed);
+
+  m_is_waiting = false;
+  m_is_flying  = false;
 }
 
 void uav_ros_tracker::OctomapPlannerClient::plannning_callback(const ros::TimerEvent& e)
