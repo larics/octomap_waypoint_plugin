@@ -150,8 +150,8 @@ path_planner:
     # increment until solution is found or it reaches "time" limit. 
     # If is_incremental is set to false, "time" becomes time limit and only
     # one search is conducted.
-    is_incremental: true
-    time: 1.0
+    is_incremental: false
+    time: 2.0
     increment: 0.25
 
   # After path is found, OMPL can simplify it and smooth it out.
