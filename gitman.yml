@@ -36,7 +36,7 @@ sources:
 sources_locked:
   - repo: https://github.com/larics/larics_motion_planning.git
     name: larics_motion_planning
-    rev: bca35a79cdab244462dd539d715886193e65dcfe
+    rev: 12bdbafac682a4d3ee79c27063286ed37ce30439
     type: git
     sparse_paths:
       -
