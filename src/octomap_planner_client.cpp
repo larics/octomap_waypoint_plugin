@@ -50,6 +50,11 @@ void uav_ros_tracker::OctomapPlannerClient::clearWaypoints()
     std::lock_guard<std::mutex> lock(m_waypoint_buffer_mutex);
     m_waypoint_buffer.clear();
   }
+
+  m_flying_id.store(-1, std::memory_order_relaxed);
+
+  m_is_waiting = false;
+  m_is_flying  = false;
 }
 
 geometry_msgs::PoseArray uav_ros_tracker::OctomapPlannerClient::getWaypointArray()
