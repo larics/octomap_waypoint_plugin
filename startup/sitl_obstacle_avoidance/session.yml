@@ -61,7 +61,10 @@ windows:
       layout: tiled
       panes:
         - waitForRos; roslaunch uav_ros_tracker topp_tracker.launch tracker_config:=custom_config/topp_config_custom.yaml
-        - waitForRos; roslaunch uav_ros_tracker waypoint_manager.launch odometry:=es_ekf/odom planner_name:=OctomapPlannerClient
+        - waitForRos; roslaunch uav_ros_tracker waypoint_manager.launch 
+          odometry:=es_ekf/odom 
+          planner_name:=OctomapPlannerClient
+          planner_config:=$(rospack find octomap_waypoint_plugin)/config/octomap_planner_client.yaml
         - waitForRos; rosrun uav_ros_tracker rviz_clicker.py __ns:=$UAV_NAMESPACE
   - planner:
       layout: tiled

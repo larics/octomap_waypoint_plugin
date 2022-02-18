@@ -87,7 +87,7 @@ path_planner:
     types: ["RealVector", "SO2"]
     # Bounds are defined by 
     #bounds: [[[-20, 20], [-10, 20], [0.0, 20.0], [-3.15, 3.15]]]
-    bounds: [[[-150, 150], [-150, 150], [0.8, 1.5]], [[-3.15, 3.15]]]
+    bounds: [[[-150, 150], [-150, 150], [0.8, 1.8]], [[-3.15, 3.15]]]
 
   # RRT* parameter set
 
@@ -150,8 +150,8 @@ path_planner:
     # increment until solution is found or it reaches "time" limit. 
     # If is_incremental is set to false, "time" becomes time limit and only
     # one search is conducted.
-    is_incremental: true
-    time: 1.0
+    is_incremental: false
+    time: 2.0
     increment: 0.25
 
   # After path is found, OMPL can simplify it and smooth it out.

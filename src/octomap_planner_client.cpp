@@ -8,20 +8,28 @@
 #include "tf2_geometry_msgs/tf2_geometry_msgs.h"
 #include "trajectory_msgs/JointTrajectory.h"
 #include "trajectory_msgs/JointTrajectoryPoint.h"
-#include "trajectory_msgs/MultiDOFJointTrajectoryPoint.h"
+#include <nav_msgs/Path.h>
 #include "uav_ros_msgs/Waypoint.h"
 #include <ios>
 #include <mutex>
 #include <octomap_waypoint_plugin/octomap_planner_client.hpp>
 #include <larics_motion_planning/MultiDofTrajectory.h>
+#include <larics_motion_planning/CheckStateValidity.h>
 #include <trajectory_msgs/MultiDOFJointTrajectory.h>
 #include <uav_ros_lib/ros_convert.hpp>
+#include <uav_ros_lib/param_util.hpp>
+#include <std_srvs/Empty.h>
 
 void uav_ros_tracker::OctomapPlannerClient::addWaypoint(
   const uav_ros_msgs::Waypoint& waypoint)
 {
   std::lock_guard<std::mutex> lock(m_waypoint_buffer_mutex);
-  m_waypoint_buffer.emplace_back(boost::make_shared<uav_ros_msgs::Waypoint>(waypoint));
+  m_waypoint_buffer.emplace(
+    m_waypoint_id_counter,
+    WaypointInfo{ m_waypoint_id_counter,
+                  boost::make_shared<uav_ros_msgs::Waypoint>(waypoint),
+                  trajectory_msgs::JointTrajectory{} });
+  m_waypoint_id_counter++;
 
   ROS_INFO("[%s] Waypoint Added [%.2f, %.2f, %.2f]",
            NAME,
@@ -38,19 +46,27 @@ void uav_ros_tracker::OctomapPlannerClient::addWaypoints(
 
 void uav_ros_tracker::OctomapPlannerClient::clearWaypoints()
 {
-  std::lock_guard<std::mutex> lock(m_waypoint_buffer_mutex);
-  m_waypoint_buffer.clear();
+  {
+    std::lock_guard<std::mutex> lock(m_waypoint_buffer_mutex);
+    m_waypoint_buffer.clear();
+  }
 }
 
 geometry_msgs::PoseArray uav_ros_tracker::OctomapPlannerClient::getWaypointArray()
 {
+  std::unordered_map<std::string, geometry_msgs::TransformStamped> transform_map_copy;
+  {
+    std::lock_guard<std::mutex> lock(m_transform_map_mutex);
+    transform_map_copy = m_transform_map;
+  }
+
   geometry_msgs::PoseArray poseArray;
 
   {
     std::lock_guard<std::mutex> lock(m_waypoint_buffer_mutex);
     for (const auto& waypoint : m_waypoint_buffer) {
-      auto transformed_wp =
-        transform_waypoint(*waypoint, m_transform_map, m_tracking_frame);
+      auto transformed_wp = transform_waypoint(
+        *(waypoint.second.waypoint), transform_map_copy, m_tracking_frame);
       poseArray.poses.push_back(transformed_wp.pose.pose);
     }
   }
@@ -63,14 +79,20 @@ std::optional<uav_ros_msgs::WaypointPtr>
 {
   std::optional<uav_ros_msgs::WaypointPtr> current_waypoint = std::nullopt;
 
+  std::unordered_map<std::string, geometry_msgs::TransformStamped> transform_map_copy;
+  {
+    std::lock_guard<std::mutex> lock(m_transform_map_mutex);
+    transform_map_copy = m_transform_map;
+  }
+
   {
     std::lock_guard<std::mutex> lock(m_waypoint_buffer_mutex);
 
     if (m_waypoint_buffer.empty()) { return current_waypoint; }
 
-    auto waypoint = m_waypoint_buffer.front();
+    auto waypoint = m_waypoint_buffer.begin()->second;
     auto transformed_wp =
-      transform_waypoint(*waypoint, m_transform_map, m_tracking_frame);
+      transform_waypoint(*(waypoint.waypoint), transform_map_copy, m_tracking_frame);
 
     current_waypoint = std::make_optional<uav_ros_msgs::WaypointPtr>(
       boost::make_shared<uav_ros_msgs::Waypoint>(transformed_wp));
@@ -111,6 +133,12 @@ bool uav_ros_tracker::OctomapPlannerClient::initialize(
   m_carrot_pose.pose.orientation.y = 0;
   m_carrot_pose.pose.orientation.z = 0;
   m_carrot_pose.pose.orientation.w = 1;
+  param_util::getParamOrThrow(
+    nh_private, "octomap_planner_client/plan_and_fly", m_plan_and_fly);
+  param_util::getParamOrThrow(
+    nh_private, "octomap_planner_client/refresh_transforms", m_refresh_transform_map);
+  param_util::getParamOrThrow(
+    nh_private, "octomap_planner_client/enable_replanning", m_enable_replanning);
 
   m_tracking_frame = std::move(tracking_frame);
   m_transform_map  = std::move(transform_map);
@@ -118,8 +146,13 @@ bool uav_ros_tracker::OctomapPlannerClient::initialize(
     nh.subscribe("carrot/pose", 1, &OctomapPlannerClient::carrot_pose_cb, this);
   m_planner_client =
     nh.serviceClient<larics_motion_planning::MultiDofTrajectory>("multi_dof_trajectory");
+  m_trajectory_checker_client =
+    nh.serviceClient<larics_motion_planning::CheckStateValidity>("validity_checker");
+  m_tracker_reset_client = nh.serviceClient<std_srvs::Empty>("tracker/reset", 1);
   m_tracker_trajectory_pub =
     nh.advertise<trajectory_msgs::MultiDOFJointTrajectory>("tracker/input_trajectory", 1);
+  m_planend_path_pub =
+    nh.advertise<nav_msgs::Path>("octomap_planner_client/planned_path", 1);
 
   m_waiting_timer = nh.createTimer(ros::Duration(1),
                                    &OctomapPlannerClient::waiting_callback,
@@ -127,11 +160,12 @@ bool uav_ros_tracker::OctomapPlannerClient::initialize(
                                    true /* oneshot */,
                                    false /*autostart */);
 
-  m_planning_timer = nh.createTimer(ros::Duration(0.01),
-                                    &OctomapPlannerClient::plannning_callback,
-                                    this,
-                                    true /* oneshot */,
-                                    false /*autostart */);
+  m_planning_timer =
+    nh.createTimer(ros::Duration(0.1), &OctomapPlannerClient::plannning_callback, this);
+  m_visualization_timer =
+    nh.createTimer(ros::Duration(1), &OctomapPlannerClient::visualization_callback, this);
+  m_trajectory_checker_timer = nh.createTimer(
+    ros::Duration(0.1), &OctomapPlannerClient::trajectory_checker_callback, this);
 
   return true;
 }
@@ -150,7 +184,8 @@ std::tuple<bool, std::string, uav_ros_msgs::WaypointPtr>
   }
 
   // Get the latest waypoint
-  uav_ros_msgs::WaypointPtr current_waypoint_ptr;
+  WaypointInfo current_waypoint_info;
+  int          waypoint_count = 0;
   {
     std::lock_guard<std::mutex> lock(m_waypoint_buffer_mutex);
 
@@ -160,34 +195,45 @@ std::tuple<bool, std::string, uav_ros_msgs::WaypointPtr>
         false, "No waypoints available.", {});
     }
 
-    current_waypoint_ptr = m_waypoint_buffer.front();
+    waypoint_count        = m_waypoint_buffer.size();
+    current_waypoint_info = m_waypoint_buffer.begin()->second;
   }
 
-  if (current_waypoint_ptr == nullptr) {
+  if (waypoint_count == 0) {
     return std::make_tuple<bool, std::string, uav_ros_msgs::WaypointPtr>(
       false, "No waypoints available.", {});
+  }
+
+  int flying_id_copy = m_flying_id.load(std::memory_order_relaxed);
+  // Flying to a waypoint that was cleared
+  if (tracking_enabled && m_is_flying
+      && current_waypoint_info.waypoint_id != flying_id_copy) {
+    ROS_FATAL("Current waypoint changed!");
+    if (tracking_enabled) { m_is_flying = false; }
   }
 
   auto distance_to_wp = distanceToCurrentWp(current_odometry);
   // If we are are flying and still haven't reached the distance
   if (m_is_flying && distance_to_wp >= DISTANCE_TOL) {
-    return std::make_tuple(false, "Flying to current waypoint!", current_waypoint_ptr);
+    return std::make_tuple(
+      false, "Flying to current waypoint!", current_waypoint_info.waypoint);
   }
 
   // We have reached the desired waypoint distance, start the waiting
   if (m_is_flying && !m_is_waiting && distance_to_wp < DISTANCE_TOL) {
     m_is_waiting = true;
     m_is_flying  = false;
-    m_waiting_timer.setPeriod(ros::Duration(current_waypoint_ptr->waiting_time), true);
+    m_waiting_timer.setPeriod(ros::Duration(current_waypoint_info.waypoint->waiting_time),
+                              true);
     m_waiting_timer.start();
     return std::make_tuple(
-      false, "Started waiting at the current waypoint!", current_waypoint_ptr);
+      false, "Started waiting at the current waypoint!", current_waypoint_info.waypoint);
   }
 
   // If we are not flying but rather waiting than
   if (m_is_waiting) {
     return std::make_tuple(
-      false, "Waiting at the current waypoint!", current_waypoint_ptr);
+      false, "Waiting at the current waypoint!", current_waypoint_info.waypoint);
   }
 
   // Check if tracker is available
@@ -197,23 +243,220 @@ std::tuple<bool, std::string, uav_ros_msgs::WaypointPtr>
       false, "Tracker is busy!", {});
   }
 
-  if (!m_planning_timer.hasPending()) {
-    m_planning_timer.setPeriod(ros::Duration(0.01), true);
+  // Check if trajectory to that waypoint is planned
+  if (current_waypoint_info.planned_path.points.empty()) {
+    return { false, "Trajectory not planned yet!", current_waypoint_info.waypoint };
   }
 
-  m_planning_timer.start();
-  return { false, "Not implemented!", nullptr };
+  // If we don't want to plan and fly wait until there is a trajectory to every waypoint
+  if (!m_plan_and_fly) {
+
+    int planned_path_count = plannedPathCount();
+    if (planned_path_count < waypoint_count) {
+      return { false,
+               "Planning status " + std::to_string(planned_path_count) + " / "
+                 + std::to_string(waypoint_count),
+               current_waypoint_info.waypoint };
+    }
+  }
+
+  auto        current_trajectory = current_waypoint_info.planned_path;
+  std::string waypoint_frame     = current_waypoint_info.planned_path.header.frame_id;
+
+  std::unordered_map<std::string, geometry_msgs::TransformStamped> transform_map_copy;
+  {
+    std::lock_guard<std::mutex> lock(m_transform_map_mutex);
+    transform_map_copy = m_transform_map;
+  }
+
+  // If there are only 2 points in the planned path, skip the first one and only send the
+  // last
+  bool skip_first_point = current_trajectory.points.size() == 2;
+
+  trajectory_msgs::MultiDOFJointTrajectory tracking_path;
+  tracking_path.header.frame_id = m_tracking_frame;
+  tracking_path.header.stamp    = ros::Time::now();
+  for (const auto& path_point : current_trajectory.points) {
+
+    if (skip_first_point) {
+      skip_first_point = false;
+      continue;
+    }
+
+    // Pack the path point in the waypoint
+    uav_ros_msgs::Waypoint map_waypoint;
+    map_waypoint.pose.header.frame_id = waypoint_frame;
+    map_waypoint.pose.pose = ros_convert::joint_trajectory_point_to_pose(path_point);
+
+    auto tracking_waypoint =
+      transform_waypoint(map_waypoint, transform_map_copy, m_tracking_frame);
+
+    tracking_path.points.push_back(
+      ros_convert::to_trajectory_point(tracking_waypoint.pose.pose));
+  }
+
+  m_flying_id.store(current_waypoint_info.waypoint_id, std::memory_order_relaxed);
+  m_tracker_trajectory_pub.publish(tracking_path);
+  m_is_flying = true;
+  return { true, "Planned trajectory published!", current_waypoint_info.waypoint };
+}
+
+void uav_ros_tracker::OctomapPlannerClient::updateTransformMap(
+  std::unordered_map<std::string, geometry_msgs::TransformStamped> transform_map)
+{
+  if (!m_refresh_transform_map) return;
+  std::lock_guard<std::mutex> lock(m_transform_map_mutex);
+  m_transform_map = std::move(transform_map);
+}
+
+int uav_ros_tracker::OctomapPlannerClient::plannedPathCount()
+{
+  std::lock_guard<std::mutex> lock(m_waypoint_buffer_mutex);
+  int                         planned_path_count = 0;
+
+  for (const auto& waypoint_info : m_waypoint_buffer) {
+    if (waypoint_info.second.planned_path.points.empty()) { continue; }
+    planned_path_count++;
+  }
+  return planned_path_count;
+}
+
+void uav_ros_tracker::OctomapPlannerClient::visualization_callback(
+  const ros::TimerEvent& e)
+{
+  std::map<int, WaypointInfo> waypoint_buffer;
+  {
+    std::lock_guard<std::mutex> lock(m_waypoint_buffer_mutex);
+    waypoint_buffer = m_waypoint_buffer;
+  }
+
+  nav_msgs::Path planned_path;
+  planned_path.header.frame_id = m_last_waypoint_frame;
+  planned_path.header.stamp    = ros::Time::now();
+
+  if (!waypoint_buffer.empty()) {
+    planned_path.header.frame_id =
+      waypoint_buffer.begin()->second.planned_path.header.frame_id;
+  }
+
+  for (const auto& waypoint_info : waypoint_buffer) {
+    for (const auto& joint_point : waypoint_info.second.planned_path.points) {
+      geometry_msgs::PoseStamped pose_stamped;
+      pose_stamped.header = planned_path.header;
+      pose_stamped.pose   = ros_convert::joint_trajectory_point_to_pose(joint_point);
+      planned_path.poses.push_back(pose_stamped);
+    }
+  }
+
+  m_planend_path_pub.publish(planned_path);
+}
+
+void uav_ros_tracker::OctomapPlannerClient::trajectory_checker_callback(
+  const ros::TimerEvent& e)
+{
+  if (!m_trajectory_checker_client.exists()) {
+    ROS_WARN_THROTTLE(
+      2.0, "[%s::trajectory_checker_callback] Checker service is missing!", NAME);
+    return;
+  }
+
+  std::map<int, WaypointInfo> waypoint_buffer_copy;
+  {
+    std::lock_guard<std::mutex> lock(m_waypoint_buffer_mutex);
+    waypoint_buffer_copy = m_waypoint_buffer;
+  }
+
+  for (const auto& wp_pair : waypoint_buffer_copy) {
+
+    if (wp_pair.second.planned_path.points.empty()) { continue; }
+
+    larics_motion_planning::CheckStateValidity state_validity;
+    state_validity.request.points = wp_pair.second.planned_path;
+
+    auto call_success = m_trajectory_checker_client.call(state_validity);
+    if (!call_success) {
+      ROS_FATAL("[%s::trajectory_checker_callback] call failed for trajectory id %d",
+                NAME,
+                wp_pair.second.waypoint_id);
+      continue;
+    }
+
+    if (state_validity.response.valid) { continue; }
+    ROS_FATAL("[%s::trajectory_checker_callback] Collision detected at trajectory id %d",
+              NAME,
+              wp_pair.second.waypoint_id);
+
+    if (!m_enable_replanning) {
+      ROS_WARN_THROTTLE(2.0, "[%s::trajectory_checker_callback] Replanning disabled.");
+      continue;
+    }
+
+    // TODO: Do something (smart!) if colision is detected
+    {
+      // Clear the waypoint to signal replanning
+      std::lock_guard<std::mutex> lock(m_waypoint_buffer_mutex);
+
+      if (m_waypoint_buffer.count(wp_pair.second.waypoint_id) == 0) {
+        ROS_FATAL(
+          "[%s::trajectory_checker_callback] Unable to clear trajectory, key missing",
+          NAME);
+        continue;
+      }
+
+      // TODO: Figure out if we passed the collision point or not, no need to stop
+      // trajectory if we are passed the collision point and still airborne :D
+      int flying_id_copy = m_flying_id.load(std::memory_order_relaxed);
+      if (m_is_flying && flying_id_copy == wp_pair.second.waypoint_id) {
+        // If we are flying on a collision trajectory, stop the tracker
+        m_is_flying = false;
+        m_flying_id.store(-1, std::memory_order_relaxed);
+
+        std_srvs::Empty stop_request;
+        int             success = m_tracker_reset_client.call(stop_request);
+        if (!success) {
+          ROS_FATAL(
+            "Dear user.\n The trajectory you are flying may be on a collision. I am "
+            "unable to stop it. You are on your own. Good luck! :)");
+          continue;
+        }
+      }
+
+      if (m_is_waiting && flying_id_copy == wp_pair.second.waypoint_id) {
+        ROS_WARN("Collision detected on a trajectory, while waiting at the last point.");
+        continue;
+      }
+
+      m_waypoint_buffer.at(wp_pair.second.waypoint_id).planned_path =
+        trajectory_msgs::JointTrajectory{};
+    }
+  }
 }
 
 void uav_ros_tracker::OctomapPlannerClient::waiting_callback(const ros::TimerEvent& e)
 {
   ROS_INFO("[%s] Waiting at waypoint finished!", NAME);
-  m_is_waiting = false;
+  int flying_id_copy = m_flying_id.load(std::memory_order_relaxed);
 
   {
     std::lock_guard<std::mutex> lock(m_waypoint_buffer_mutex);
-    m_waypoint_buffer.pop_front();
+    if (m_waypoint_buffer.empty()) {
+      ROS_WARN(
+        "[waiting_callback] Waiting at waypoint %d finished but waypoints were cleared "
+        "in the meantime.",
+        flying_id_copy);
+    } else if (m_waypoint_buffer.count(flying_id_copy) > 0) {
+      m_waypoint_buffer.erase(flying_id_copy);
+    } else {
+      ROS_WARN(
+        "[waiting_callback] Not poping waypoint from buffer. It was changed while "
+        "waiting.");
+    }
   }
+
+  m_flying_id.store(-1, std::memory_order_relaxed);
+
+  m_is_waiting = false;
+  m_is_flying  = false;
 }
 
 void uav_ros_tracker::OctomapPlannerClient::plannning_callback(const ros::TimerEvent& e)
@@ -225,6 +468,11 @@ void uav_ros_tracker::OctomapPlannerClient::plannning_callback(const ros::TimerE
     return;
   }
 
+  if (m_carrot_pose_sub.getNumPublishers() < 1) {
+    ROS_WARN_THROTTLE(2.0, "[%s::planning_callback] Carrot publisher is missing!", NAME);
+    return;
+  }
+
   // Get the current carrot pose
   geometry_msgs::PoseStamped current_carrot_pose;
   {
@@ -233,30 +481,51 @@ void uav_ros_tracker::OctomapPlannerClient::plannning_callback(const ros::TimerE
   }
 
   // Get the current waypoint
-  uav_ros_msgs::Waypoint current_waypoint;
+  std::map<int, WaypointInfo> waypoint_buffer_copy;
   {
     std::lock_guard<std::mutex> lock(m_waypoint_buffer_mutex);
     if (m_waypoint_buffer.empty()) {
-      ROS_WARN("[%s::plannning_callback] No waypoints to plan!", NAME);
+      ROS_WARN_THROTTLE(2.0, "[%s::plannning_callback] No waypoints to plan!", NAME);
       return;
     }
 
-    current_waypoint = *m_waypoint_buffer.front();
+    waypoint_buffer_copy = m_waypoint_buffer;
+  }
+
+  std::unordered_map<std::string, geometry_msgs::TransformStamped> transform_map_copy;
+  {
+    std::lock_guard<std::mutex> lock(m_transform_map_mutex);
+    transform_map_copy = m_transform_map;
+  }
+
+  int planned_trajectory_count = plannedPathCount();
+  if (m_is_flying && planned_trajectory_count == 0) {
+    ROS_WARN_THROTTLE(2.0,
+                      "[%s::planning_callback] Not planning while flying and no other "
+                      "trajectories are available!",
+                      NAME);
+    return;
+  }
+
+  if (planned_trajectory_count == waypoint_buffer_copy.size()) {
+    ROS_WARN_THROTTLE(2.0, "[%s::planning_callback] All waypoints are planned!", NAME);
+    return;
   }
 
   // Transform carrot pose
-  auto waypoint_frame = current_waypoint.pose.header.frame_id;
-  if (m_transform_map.count(waypoint_frame) == 0) {
+  m_last_waypoint_frame =
+    waypoint_buffer_copy.begin()->second.waypoint->pose.header.frame_id;
+  if (transform_map_copy.count(m_last_waypoint_frame) == 0) {
     ROS_FATAL_THROTTLE(2.0,
                        "[%s::plannning_callback] waypoint frame %s unrecognized",
                        NAME,
-                       waypoint_frame.c_str());
+                       m_last_waypoint_frame.c_str());
     return;
   }
 
   // Carrot pose is in the current tracking frame
   // Transform it to the waypoint frame to figure out where to start planning
-  const auto     waypoint_to_tracking = m_transform_map.at(waypoint_frame);
+  const auto     waypoint_to_tracking = transform_map_copy.at(m_last_waypoint_frame);
   tf2::Transform waypoint_to_tracking_transform;
   tf2::fromMsg(waypoint_to_tracking.transform, waypoint_to_tracking_transform);
   const auto tracking_to_waypoint_transform = waypoint_to_tracking_transform.inverse();
@@ -271,40 +540,71 @@ void uav_ros_tracker::OctomapPlannerClient::plannning_callback(const ros::TimerE
   tf2::doTransform(
     current_carrot_pose, transformed_carrot_pose, tracking_to_waypoint_stamped);
 
-  // Pack the carrot point to JointTrajectoryPoint
-  trajectory_msgs::JointTrajectoryPoint carrot_point;
-  carrot_point.positions =
-    std::vector<double>{ transformed_carrot_pose.pose.position.x,
-                         transformed_carrot_pose.pose.position.y,
-                         transformed_carrot_pose.pose.position.z,
-                         ros_convert::calculateYaw(
-                           transformed_carrot_pose.pose.orientation.x,
-                           transformed_carrot_pose.pose.orientation.y,
-                           transformed_carrot_pose.pose.orientation.z,
-                           transformed_carrot_pose.pose.orientation.w) };
+  // Check if we should start planning from carrot/pose
+  bool empty_trajectory_buffer = planned_trajectory_count == 0;
 
-  // Pack the waypoint point to JointTrajectoryPoint
-  trajectory_msgs::JointTrajectoryPoint waypoint_point;
-  waypoint_point.positions =
-    std::vector<double>{ current_waypoint.pose.pose.position.x,
-                         current_waypoint.pose.pose.position.y,
-                         current_waypoint.pose.pose.position.z,
-                         ros_convert::calculateYaw(
-                           current_waypoint.pose.pose.orientation.x,
-                           current_waypoint.pose.pose.orientation.y,
-                           current_waypoint.pose.pose.orientation.z,
-                           current_waypoint.pose.pose.orientation.w) };
+  // Plan trajectories
+  auto it = waypoint_buffer_copy.begin();
+  for (int i = 0; i < waypoint_buffer_copy.size(); i++) {
+    if (i != 0) { std::advance(it, 1); }
 
-  ROS_INFO_STREAM_THROTTLE(
-    2.0, "[plannning_callback] transformed carrot pose " << transformed_carrot_pose);
+    // Check if waypoint is already planned
+    if (!it->second.planned_path.points.empty()) {
+      ROS_INFO("[planning_loop] Skipping waypoing at index %d", i);
+      continue;
+    }
 
-  ROS_INFO_STREAM_THROTTLE(
-    2.0, "[plannning_callback] waypoint_pose pose " << current_waypoint.pose);
+    trajectory_msgs::JointTrajectoryPoint start_point;
+    if (i == 0) {
+      // If the first waypoint is not planned, plan it from the current carrot point
+      start_point =
+        ros_convert::pose_to_joint_trajectory_point(transformed_carrot_pose.pose);
+    } else {
+      const auto previous_waypoint = *std::prev(it)->second.waypoint;
+      start_point =
+        ros_convert::pose_to_joint_trajectory_point(previous_waypoint.pose.pose);
+    }
+
+    const auto                            current_waypoint = *it->second.waypoint;
+    trajectory_msgs::JointTrajectoryPoint end_point =
+      ros_convert::pose_to_joint_trajectory_point(current_waypoint.pose.pose);
+
+    auto planned_points =
+      planTrajectoryBetween(start_point, end_point, m_last_waypoint_frame);
+    planned_points.header.frame_id = m_last_waypoint_frame;
+    planned_points.header.stamp    = ros::Time::now();
+    if (planned_points.points.empty()) {
+      ROS_FATAL("[planning_loop] Planning failed from %d to %d", i - 1, i);
+      continue;
+    }
+
+    {
+      // Clear the waypoint to signal replanning
+      std::lock_guard<std::mutex> lock(m_waypoint_buffer_mutex);
+
+      if (m_waypoint_buffer.count(it->second.waypoint_id) == 0) {
+        ROS_FATAL("[%s::planning_loop] Unable to add trajectory, key missing", NAME);
+        continue;
+      }
+
+      m_waypoint_buffer.at(it->second.waypoint_id).planned_path = planned_points;
+    }
+  }
+}
+
+trajectory_msgs::JointTrajectory
+  uav_ros_tracker::OctomapPlannerClient::planTrajectoryBetween(
+    const trajectory_msgs::JointTrajectoryPoint& start_point,
+    const trajectory_msgs::JointTrajectoryPoint& end_point,
+    const std::string&                           waypoint_frame)
+{
+  ROS_INFO_STREAM_THROTTLE(2.0, "[planTrajectoryBetween] Start point " << start_point);
+  ROS_INFO_STREAM_THROTTLE(2.0, "[planTrajectoryBetween] End point " << end_point);
 
   // Pack the points in the request
   larics_motion_planning::MultiDofTrajectory planning_service;
   planning_service.request.waypoints.points =
-    std::vector<trajectory_msgs::JointTrajectoryPoint>{ carrot_point, waypoint_point };
+    std::vector<trajectory_msgs::JointTrajectoryPoint>{ start_point, end_point };
   planning_service.request.waypoints.joint_names =
     std::vector<std::string>{ "x", "y", "z", "yaw" };
   planning_service.request.plan_trajectory    = true;
@@ -315,15 +615,15 @@ void uav_ros_tracker::OctomapPlannerClient::plannning_callback(const ros::TimerE
   auto call_success = m_planner_client.call(planning_service);
   if (!call_success) {
     ROS_FATAL_THROTTLE(
-      2.0, "[%s::plannning_callback] call to plannning service failed.", NAME);
-    return;
+      2.0, "[%s::planTrajectoryBetween] call to plannning service failed.", NAME);
+    return trajectory_msgs::JointTrajectory{};
   }
 
   auto planning_response = planning_service.response;
   if (!planning_response.success) {
-    ROS_WARN_THROTTLE(2.0, "[%s::plannning_callback] Planning failed!", NAME);
+    ROS_WARN_THROTTLE(2.0, "[%s::planTrajectoryBetween] Planning failed!", NAME);
     // TODO: Do something if planning fails...
-    return;
+    return trajectory_msgs::JointTrajectory{};
   }
 
   ROS_INFO_THROTTLE(1.0,
@@ -331,43 +631,8 @@ void uav_ros_tracker::OctomapPlannerClient::plannning_callback(const ros::TimerE
                     planning_response.path.points.size(),
                     planning_response.trajectory.points.size());
 
-  trajectory_msgs::MultiDOFJointTrajectory tracking_path;
-  for (const auto& path_point : planning_response.path.points) {
 
-    // Pack the path point in the waypoint
-    uav_ros_msgs::Waypoint map_waypoint;
-    map_waypoint.pose.header.frame_id = waypoint_frame;
-    map_waypoint.pose.pose.position.x = path_point.positions[0];
-    map_waypoint.pose.pose.position.y = path_point.positions[1];
-    map_waypoint.pose.pose.position.z = path_point.positions[2];
-    map_waypoint.pose.pose.orientation =
-      ros_convert::calculate_quaternion(path_point.positions[3]);
-
-    auto tracking_waypoint =
-      transform_waypoint(map_waypoint, m_transform_map, m_tracking_frame);
-
-    // construct the tracking trajectory point
-    trajectory_msgs::MultiDOFJointTrajectoryPoint tracking_point;
-    tracking_point.transforms = std::vector<geometry_msgs::Transform>(1);
-    tracking_point.transforms.front().translation.x =
-      tracking_waypoint.pose.pose.position.x;
-    tracking_point.transforms.front().translation.y =
-      tracking_waypoint.pose.pose.position.y;
-    tracking_point.transforms.front().translation.z =
-      tracking_waypoint.pose.pose.position.z;
-    tracking_point.transforms.front().rotation.x =
-      tracking_waypoint.pose.pose.orientation.x;
-    tracking_point.transforms.front().rotation.y =
-      tracking_waypoint.pose.pose.orientation.y;
-    tracking_point.transforms.front().rotation.z =
-      tracking_waypoint.pose.pose.orientation.z;
-    tracking_point.transforms.front().rotation.w =
-      tracking_waypoint.pose.pose.orientation.w;
-    tracking_path.points.push_back(tracking_point);
-  }
-
-  m_tracker_trajectory_pub.publish(tracking_path);
-  m_is_flying = true;
+  return planning_response.path;
 }
 
 void uav_ros_tracker::OctomapPlannerClient::carrot_pose_cb(
