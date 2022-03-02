@@ -74,6 +74,8 @@ windows:
           base_link_frame_id:=eagle/robot
         - waitForRos; rosparam set use_sim_time true; roslaunch octomap_waypoint_plugin global_planner.launch 
           frame_id:=$SF_CARTO_MAP
+        - waitForRos; inspection_ws; roslaunch uav_ros_indoor failsafe_system.launch 
+          config:=custom_config/failsafe_config.yaml map_pose:=uav/cartographer/pose
   - rviz:
       layout: tiled
       panes:

@@ -1,0 +1,4 @@
+failsafe:
+  auto_emergency: false
+  sensors: [gazebo, carto]
+  emergency_poses: [[10, 8, 1]]
