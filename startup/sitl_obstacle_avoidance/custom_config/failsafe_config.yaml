@@ -1,4 +1,4 @@
 failsafe:
   auto_emergency: false
   sensors: [gazebo, carto]
-  emergency_poses: [[10, 8, 1]]
+  emergency_poses: [[10, 8, 1], [11.9, -12.77, 1]]
