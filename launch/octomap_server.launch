@@ -7,6 +7,7 @@
   <arg name="min_z"               default="-2.0" />
   <arg name="max_z"               default="20.0" />
   <arg name="cloud_in"            default="submap_cloud" />
+  <arg name="map_file"            default="map_file" />
 
   <node name="octomap_server" pkg="octomap_server" type="octomap_server_node" ns="$(arg namespace)">
     <param name="frame_id"          value="$(arg map_frame_id)"/>      
@@ -14,6 +15,8 @@
     <param name="pointclud_min_z"   value="$(arg min_z)" />
     <param name="pointclud_max_z"   value="$(arg max_z)" />
     <param name="base_frame_id"     value="$(arg base_link_frame_id)" />
+    <param name="map_file"          value="$(arg map_file)" />
+    <param name="sensor_model/miss" value="0.01" />
 
     <remap from="cloud_in"  to="$(arg cloud_in)" />
   </node>
