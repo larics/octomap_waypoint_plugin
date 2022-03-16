@@ -70,12 +70,12 @@ geometry_msgs::PoseArray uav_ros_tracker::OctomapPlannerClient::getWaypointArray
   {
     std::lock_guard<std::mutex> lock(m_waypoint_buffer_mutex);
     for (const auto& waypoint : m_waypoint_buffer) {
-      auto transformed_wp = transform_waypoint(
-        *(waypoint.second.waypoint), transform_map_copy, m_tracking_frame);
-      poseArray.poses.push_back(transformed_wp.pose.pose);
+      poseArray.header.frame_id = waypoint.second.waypoint->pose.header.frame_id;
+      poseArray.poses.push_back(waypoint.second.waypoint->pose.pose);
     }
   }
 
+  poseArray.header.stamp = ros::Time::now();
   return poseArray;
 }
 
