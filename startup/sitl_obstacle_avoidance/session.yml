@@ -71,8 +71,9 @@ windows:
       panes:
         - waitForRos; roslaunch octomap_waypoint_plugin octomap_server.launch
           map_frame_id:=eagle/carto_raw
-          base_link_frame_id:=eagle/robot
-          map_file:=custom_config/gazebo_carto.ot
+          base_link_frame_id:=$UAV_NAMESPACE/map/base_link
+          cloud_in:=map/velodyne_points
+          map_file:=$(pwd)/custom_config/gazebo_carto.ot
         - waitForRos; rosparam set use_sim_time true; roslaunch octomap_waypoint_plugin global_planner.launch 
           frame_id:=$SF_CARTO_MAP
         - waitForRos; inspection_ws; roslaunch uav_ros_indoor failsafe_system.launch 
