@@ -1,0 +1,5 @@
+resolution: 0.1
+pointcloud_min_z: -2.0
+pointcloud_max_z: 3.0
+sensor_model/miss: 0.45
+sensor_model/hit: 0.6
