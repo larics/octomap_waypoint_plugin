@@ -210,11 +210,28 @@ std::tuple<bool, std::string, uav_ros_msgs::WaypointPtr>
   }
 
   int flying_id_copy = m_flying_id.load(std::memory_order_relaxed);
-  // Flying to a waypoint that was cleared
-  if (tracking_enabled && m_is_flying
-      && current_waypoint_info.waypoint_id != flying_id_copy) {
+  // Flying to a waypoint that was cleared / changed
+  if ((m_is_flying || !tracking_enabled) && current_waypoint_info.waypoint_id != flying_id_copy) {
     ROS_FATAL("Current waypoint changed!");
-    if (tracking_enabled) { m_is_flying = false; }
+    m_is_flying = false;
+
+    // Stop the tracker
+    if (!tracking_enabled)
+    {
+        std_srvs::Empty stop_request;
+        int             success;
+        {
+          std::lock_guard<std::mutex> lock(m_tracker_mutex);
+          success = m_tracker_reset_client.call(stop_request);
+        }
+        if (!success) {
+          ROS_FATAL(
+            "Dear user.\n The trajectory you are flying may be on a collision. I am "
+            "unable to stop it. You are on your own. Good luck! :)");
+          return std::make_tuple(
+            false, "Unable to stop Tracker!", current_waypoint_info.waypoint);;
+        }
+    }
   }
 
   auto distance_to_wp = distanceToCurrentWp(current_odometry);
@@ -301,7 +318,11 @@ std::tuple<bool, std::string, uav_ros_msgs::WaypointPtr>
   }
 
   m_flying_id.store(current_waypoint_info.waypoint_id, std::memory_order_relaxed);
-  m_tracker_trajectory_pub.publish(tracking_path);
+  {
+    std::lock_guard<std::mutex> lock(m_tracker_mutex);
+    m_tracker_trajectory_pub.publish(tracking_path);
+  }
+
   m_is_flying = true;
   return { true, "Planned trajectory published!", current_waypoint_info.waypoint };
 }
@@ -392,7 +413,8 @@ void uav_ros_tracker::OctomapPlannerClient::trajectory_checker_callback(
               wp_pair.second.waypoint_id);
 
     if (!m_enable_replanning) {
-      ROS_WARN_THROTTLE(2.0, "[%s::trajectory_checker_callback] Replanning disabled.");
+      ROS_WARN_THROTTLE(
+        2.0, "[%s::trajectory_checker_callback] Replanning disabled.", NAME);
       continue;
     }
 
@@ -417,7 +439,11 @@ void uav_ros_tracker::OctomapPlannerClient::trajectory_checker_callback(
         m_flying_id.store(-1, std::memory_order_relaxed);
 
         std_srvs::Empty stop_request;
-        int             success = m_tracker_reset_client.call(stop_request);
+        int             success;
+        {
+          std::lock_guard<std::mutex> lock(m_tracker_mutex);
+          success = m_tracker_reset_client.call(stop_request);
+        }
         if (!success) {
           ROS_FATAL(
             "Dear user.\n The trajectory you are flying may be on a collision. I am "
@@ -439,7 +465,7 @@ void uav_ros_tracker::OctomapPlannerClient::trajectory_checker_callback(
 
 void uav_ros_tracker::OctomapPlannerClient::waiting_callback(const ros::TimerEvent& e)
 {
-  ROS_INFO("[%s] Waiting at waypoint finished!", NAME);
+  ROS_INFO("[%s::waiting_callback] Waiting at waypoint finished!", NAME);
   int flying_id_copy = m_flying_id.load(std::memory_order_relaxed);
 
   {
