@@ -61,7 +61,7 @@ private:
   int plannedPathCount();
 
   static constexpr auto NAME         = "OctomapPlannerClient";
-  static constexpr auto DISTANCE_TOL = 0.5;
+  static constexpr auto DISTANCE_TOL = 1;
 
   ros::Timer m_waiting_timer;
   void       waiting_callback(const ros::TimerEvent& e);
@@ -94,6 +94,7 @@ private:
 
   ros::ServiceClient m_trajectory_checker_client;
   ros::ServiceClient m_planner_client;
+  std::mutex         m_tracker_mutex;
   ros::ServiceClient m_tracker_reset_client;
   ros::Publisher     m_tracker_trajectory_pub;
   ros::Publisher     m_planend_path_pub;
