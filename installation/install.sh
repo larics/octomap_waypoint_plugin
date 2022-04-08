@@ -27,12 +27,17 @@ sudo apt-get install -y \
     libompl-dev \
     ros-$ROS_DISTRO-octomap-ros \
     ros-$ROS_DISTRO-octomap \
-    ros-$ROS_DISTRO-octomap-server \
     ros-$ROS_DISTRO-octomap-rviz-plugins \
     ros-$ROS_DISTRO-ompl \
     ros-$ROS_DISTRO-moveit \
     ros-$ROS_DISTRO-moveit-visual-tools \
     ros-$ROS_DISTRO-dynamixel-workbench-msgs
+
+# Check for octomap_server
+num=$(dpkg --list | grep ros-$ROS_DISTRO-octomap-server | wc -l)
+if [ "$num" -gt "0" ]; then
+  sudo apt-get purge -y ros-$ROS_DISTRO-octomap-server
+fi
 
 # Install Gitman
 curl https://raw.githubusercontent.com/larics/uav_ros_stack/main/installation/dependencies/gitman.sh | bash
