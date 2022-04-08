@@ -33,6 +33,17 @@ sources:
       -
     scripts:
       - git submodule update --init --recursive
+  - repo: https://github.com/larics/octomap_mapping/
+    name: octomap_mapping
+    rev: kinetic-devel
+    type: git
+    sparse_paths:
+      -
+    link:
+    links:
+      -
+    scripts:
+      - git submodule update --init --recursive
 sources_locked:
   - repo: https://github.com/larics/larics_motion_planning.git
     name: larics_motion_planning
@@ -59,6 +70,17 @@ sources_locked:
   - repo: https://github.com/larics/aerial_manipulators.git
     name: aerial_manipulators
     rev: 54afe039082c1c3847d53cb90a089c6c9376f2ee
+    type: git
+    sparse_paths:
+      -
+    link:
+    links:
+      -
+    scripts:
+      - git submodule update --init --recursive
+  - repo: https://github.com/larics/octomap_mapping/
+    name: octomap_mapping
+    rev: 23a77df2b170f3a2c60ec275372f84f59cc967eb
     type: git
     sparse_paths:
       -
