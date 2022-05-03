@@ -69,7 +69,7 @@ sources_locked:
       - git submodule update --init --recursive
   - repo: https://github.com/larics/aerial_manipulators.git
     name: aerial_manipulators
-    rev: 54afe039082c1c3847d53cb90a089c6c9376f2ee
+    rev: c64defb35bc0b7573c7f68ff5b20a187d34cd5fe
     type: git
     sparse_paths:
       -
