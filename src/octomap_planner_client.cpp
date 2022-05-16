@@ -1,6 +1,7 @@
 #include "geometry_msgs/PoseStamped.h"
 #include "geometry_msgs/TransformStamped.h"
 #include "larics_motion_planning/MultiDofTrajectoryRequest.h"
+#include "nav_msgs/Odometry.h"
 #include "ros/duration.h"
 #include "ros/forwards.h"
 #include "tf2/LinearMath/Transform.h"
@@ -113,18 +114,26 @@ uav_ros_msgs::WaypointStatus uav_ros_tracker::OctomapPlannerClient::getWaypointS
   auto                         current_wp = getCurrentWaypoint();
   waypointStatus.current_wp =
     current_wp.has_value() ? *current_wp.value() : uav_ros_msgs::Waypoint{};
-  waypointStatus.distance_to_wp = distanceToCurrentWp(odom);
+  waypointStatus.distance_to_wp = distanceToCurrentWp();
   waypointStatus.flying_to_wp   = m_is_flying;
   waypointStatus.waiting_at_wp  = m_is_waiting;
   return waypointStatus;
 }
 
-double uav_ros_tracker::OctomapPlannerClient::distanceToCurrentWp(
-  const nav_msgs::Odometry& odom)
+double uav_ros_tracker::OctomapPlannerClient::distanceToCurrentWp()
 {
   auto optional_waypoint = getCurrentWaypoint();
   if (!optional_waypoint.has_value() || !optional_waypoint.value()) { return -1; }
 
+  // Get the current carrot pose
+  geometry_msgs::PoseStamped current_carrot_pose;
+  {
+    std::lock_guard<std::mutex> lock(m_carrot_pose_mutex);
+    current_carrot_pose = m_carrot_pose;
+  }
+
+  nav_msgs::Odometry odom;
+  odom.pose.pose = current_carrot_pose.pose;
   return calc_distance(odom, *optional_waypoint.value());
 }
 
@@ -209,6 +218,24 @@ std::tuple<bool, std::string, uav_ros_msgs::WaypointPtr>
       false, "No waypoints available.", {});
   }
 
+  // If we are not flying but rather waiting than
+  if (m_is_waiting) {
+    return std::make_tuple(
+      false, "Waiting at the current waypoint!", current_waypoint_info.waypoint);
+  }
+
+  // Check if tracker is available
+  if (!tracking_enabled) {
+    // reset();
+    return std::make_tuple<bool, std::string, uav_ros_msgs::WaypointPtr>(
+      false, "Tracker is busy!", {});
+  }
+
+  // Check if trajectory to that waypoint is planned
+  if (current_waypoint_info.planned_path.points.empty()) {
+    return { false, "Trajectory not planned yet!", current_waypoint_info.waypoint };
+  }
+
   int flying_id_copy = m_flying_id.load(std::memory_order_relaxed);
   // Flying to a waypoint that was cleared / changed
   if ((m_is_flying || !tracking_enabled) && current_waypoint_info.waypoint_id != flying_id_copy) {
@@ -234,7 +261,7 @@ std::tuple<bool, std::string, uav_ros_msgs::WaypointPtr>
     }
   }
 
-  auto distance_to_wp = distanceToCurrentWp(current_odometry);
+  auto distance_to_wp = distanceToCurrentWp();
   // If we are are flying and still haven't reached the distance
   if (m_is_flying && distance_to_wp >= DISTANCE_TOL) {
     return std::make_tuple(
@@ -250,24 +277,6 @@ std::tuple<bool, std::string, uav_ros_msgs::WaypointPtr>
     m_waiting_timer.start();
     return std::make_tuple(
       false, "Started waiting at the current waypoint!", current_waypoint_info.waypoint);
-  }
-
-  // If we are not flying but rather waiting than
-  if (m_is_waiting) {
-    return std::make_tuple(
-      false, "Waiting at the current waypoint!", current_waypoint_info.waypoint);
-  }
-
-  // Check if tracker is available
-  if (!tracking_enabled) {
-    // reset();
-    return std::make_tuple<bool, std::string, uav_ros_msgs::WaypointPtr>(
-      false, "Tracker is busy!", {});
-  }
-
-  // Check if trajectory to that waypoint is planned
-  if (current_waypoint_info.planned_path.points.empty()) {
-    return { false, "Trajectory not planned yet!", current_waypoint_info.waypoint };
   }
 
   // If we don't want to plan and fly wait until there is a trajectory to every waypoint

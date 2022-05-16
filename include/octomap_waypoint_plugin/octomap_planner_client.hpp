@@ -53,7 +53,7 @@ public:
 
 private:
   std::optional<uav_ros_msgs::WaypointPtr> getCurrentWaypoint();
-  double                           distanceToCurrentWp(const nav_msgs::Odometry& odom);
+  double                           distanceToCurrentWp();
   trajectory_msgs::JointTrajectory planTrajectoryBetween(
     const trajectory_msgs::JointTrajectoryPoint& start_point,
     const trajectory_msgs::JointTrajectoryPoint& end_point,
@@ -61,7 +61,7 @@ private:
   int plannedPathCount();
 
   static constexpr auto NAME         = "OctomapPlannerClient";
-  static constexpr auto DISTANCE_TOL = 1;
+  static constexpr auto DISTANCE_TOL = 1.5;
 
   ros::Timer m_waiting_timer;
   void       waiting_callback(const ros::TimerEvent& e);
