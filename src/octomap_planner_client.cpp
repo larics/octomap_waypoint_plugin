@@ -224,17 +224,6 @@ std::tuple<bool, std::string, uav_ros_msgs::WaypointPtr>
       false, "Waiting at the current waypoint!", current_waypoint_info.waypoint);
   }
 
-  // Check if tracker is available
-  if (!tracking_enabled) {
-    // reset();
-    return std::make_tuple<bool, std::string, uav_ros_msgs::WaypointPtr>(
-      false, "Tracker is busy!", {});
-  }
-
-  // Check if trajectory to that waypoint is planned
-  if (current_waypoint_info.planned_path.points.empty()) {
-    return { false, "Trajectory not planned yet!", current_waypoint_info.waypoint };
-  }
 
   int flying_id_copy = m_flying_id.load(std::memory_order_relaxed);
   // Flying to a waypoint that was cleared / changed
@@ -259,6 +248,18 @@ std::tuple<bool, std::string, uav_ros_msgs::WaypointPtr>
             false, "Unable to stop Tracker!", current_waypoint_info.waypoint);;
         }
     }
+  }
+
+  // Check if tracker is available
+  if (!tracking_enabled) {
+    // reset();
+    return std::make_tuple<bool, std::string, uav_ros_msgs::WaypointPtr>(
+      false, "Tracker is busy!", {});
+  }
+
+  // Check if trajectory to that waypoint is planned
+  if (current_waypoint_info.planned_path.points.empty()) {
+    return { false, "Trajectory not planned yet!", current_waypoint_info.waypoint };
   }
 
   auto distance_to_wp = distanceToCurrentWp();
