@@ -53,6 +53,14 @@ void uav_ros_tracker::OctomapPlannerClient::clearWaypoints()
   }
 
   set_state(IDLE);
+
+  std_srvs::Empty stop_request;
+  int             success;
+  {
+    std::lock_guard<std::mutex> lock(m_tracker_mutex);
+    success = m_tracker_reset_client.call(stop_request);
+  }
+  if (!success) { ROS_FATAL("Unable to stop trajectory"); }
 }
 
 geometry_msgs::PoseArray uav_ros_tracker::OctomapPlannerClient::getWaypointArray()
