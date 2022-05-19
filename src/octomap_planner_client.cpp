@@ -52,10 +52,7 @@ void uav_ros_tracker::OctomapPlannerClient::clearWaypoints()
     m_waypoint_buffer.clear();
   }
 
-  m_flying_id.store(-1, std::memory_order_relaxed);
-
-  m_is_waiting = false;
-  m_is_flying  = false;
+  set_state(IDLE);
 }
 
 geometry_msgs::PoseArray uav_ros_tracker::OctomapPlannerClient::getWaypointArray()
@@ -115,8 +112,8 @@ uav_ros_msgs::WaypointStatus uav_ros_tracker::OctomapPlannerClient::getWaypointS
   waypointStatus.current_wp =
     current_wp.has_value() ? *current_wp.value() : uav_ros_msgs::Waypoint{};
   waypointStatus.distance_to_wp = distanceToCurrentWp();
-  waypointStatus.flying_to_wp   = m_is_flying;
-  waypointStatus.waiting_at_wp  = m_is_waiting;
+  waypointStatus.flying_to_wp   = is_flying();
+  waypointStatus.waiting_at_wp  = is_waiting();
   return waypointStatus;
 }
 
@@ -213,40 +210,51 @@ std::tuple<bool, std::string, uav_ros_msgs::WaypointPtr>
     current_waypoint_info = m_waypoint_buffer.begin()->second;
   }
 
+  if (is_ready_to_fly()) {
+    if (tracking_enabled) {
+      return std::make_tuple<bool, std::string, uav_ros_msgs::WaypointPtr>(
+        false, "Trajectory requested but not started!", {});
+    } else {
+      set_state(FLYING);
+    }
+  }
+
   if (waypoint_count == 0) {
     return std::make_tuple<bool, std::string, uav_ros_msgs::WaypointPtr>(
       false, "No waypoints available.", {});
   }
 
   // If we are not flying but rather waiting than
-  if (m_is_waiting) {
+  if (is_waiting()) {
     return std::make_tuple(
       false, "Waiting at the current waypoint!", current_waypoint_info.waypoint);
   }
 
-
-  int flying_id_copy = m_flying_id.load(std::memory_order_relaxed);
-  // Flying to a waypoint that was cleared / changed
-  if ((m_is_flying || !tracking_enabled) && current_waypoint_info.waypoint_id != flying_id_copy) {
-    ROS_FATAL("Current waypoint changed!");
-    m_is_flying = false;
+  int flying_id_copy = get_flying_id();
+  // Flying to a waypoint that was changed
+  if ((is_flying() || !tracking_enabled)
+      && current_waypoint_info.waypoint_id != flying_id_copy && flying_id_copy != NO_ID) {
+    ROS_FATAL("Current waypoint changed! %d vs %d",
+              flying_id_copy,
+              current_waypoint_info.waypoint_id);
+    set_state(IDLE);
 
     // Stop the tracker
-    if (!tracking_enabled)
-    {
-        std_srvs::Empty stop_request;
-        int             success;
-        {
-          std::lock_guard<std::mutex> lock(m_tracker_mutex);
-          success = m_tracker_reset_client.call(stop_request);
-        }
-        if (!success) {
-          ROS_FATAL(
-            "Dear user.\n The trajectory you are flying may be on a collision. I am "
-            "unable to stop it. You are on your own. Good luck! :)");
-          return std::make_tuple(
-            false, "Unable to stop Tracker!", current_waypoint_info.waypoint);;
-        }
+    if (!tracking_enabled) {
+      std_srvs::Empty stop_request;
+      int             success;
+      {
+        std::lock_guard<std::mutex> lock(m_tracker_mutex);
+        success = m_tracker_reset_client.call(stop_request);
+      }
+      if (!success) {
+        ROS_FATAL(
+          "Dear user.\n The trajectory you are flying may be on a collision. I am "
+          "unable to stop it. You are on your own. Good luck! :)");
+        return std::make_tuple(
+          false, "Unable to stop Tracker!", current_waypoint_info.waypoint);
+        ;
+      }
     }
   }
 
@@ -264,20 +272,27 @@ std::tuple<bool, std::string, uav_ros_msgs::WaypointPtr>
 
   auto distance_to_wp = distanceToCurrentWp();
   // If we are are flying and still haven't reached the distance
-  if (m_is_flying && distance_to_wp >= DISTANCE_TOL) {
+  if (is_flying() && distance_to_wp >= DISTANCE_TOL) {
     return std::make_tuple(
       false, "Flying to current waypoint!", current_waypoint_info.waypoint);
   }
 
   // We have reached the desired waypoint distance, start the waiting
-  if (m_is_flying && !m_is_waiting && distance_to_wp < DISTANCE_TOL) {
-    m_is_waiting = true;
-    m_is_flying  = false;
-    m_waiting_timer.setPeriod(ros::Duration(current_waypoint_info.waypoint->waiting_time),
-                              true);
-    m_waiting_timer.start();
-    return std::make_tuple(
-      false, "Started waiting at the current waypoint!", current_waypoint_info.waypoint);
+  if (is_flying() && tracking_enabled) {
+
+    if (distance_to_wp < DISTANCE_TOL) {
+      set_state(WAITING);
+      m_waiting_timer.setPeriod(
+        ros::Duration(current_waypoint_info.waypoint->waiting_time), true);
+      m_waiting_timer.start();
+      return std::make_tuple(false,
+                             "Started waiting at the current waypoint!",
+                             current_waypoint_info.waypoint);
+    } else {
+
+      return std::make_tuple<bool, std::string, uav_ros_msgs::WaypointPtr>(
+        false, "State is flying but tracking is not enabled.", {});
+    }
   }
 
   // If we don't want to plan and fly wait until there is a trajectory to every waypoint
@@ -327,13 +342,12 @@ std::tuple<bool, std::string, uav_ros_msgs::WaypointPtr>
       ros_convert::to_trajectory_point(tracking_waypoint.pose.pose));
   }
 
-  m_flying_id.store(current_waypoint_info.waypoint_id, std::memory_order_relaxed);
+  set_state(READY_TO_FLY, current_waypoint_info.waypoint_id);
   {
     std::lock_guard<std::mutex> lock(m_tracker_mutex);
     m_tracker_trajectory_pub.publish(tracking_path);
   }
 
-  m_is_flying = true;
   return { true, "Planned trajectory published!", current_waypoint_info.waypoint };
 }
 
@@ -442,11 +456,10 @@ void uav_ros_tracker::OctomapPlannerClient::trajectory_checker_callback(
 
       // TODO: Figure out if we passed the collision point or not, no need to stop
       // trajectory if we are passed the collision point and still airborne :D
-      int flying_id_copy = m_flying_id.load(std::memory_order_relaxed);
-      if (m_is_flying && flying_id_copy == wp_pair.second.waypoint_id) {
+      int flying_id_copy = get_flying_id();
+      if (is_flying() && flying_id_copy == wp_pair.second.waypoint_id) {
         // If we are flying on a collision trajectory, stop the tracker
-        m_is_flying = false;
-        m_flying_id.store(-1, std::memory_order_relaxed);
+        set_state(IDLE);
 
         std_srvs::Empty stop_request;
         int             success;
@@ -462,7 +475,7 @@ void uav_ros_tracker::OctomapPlannerClient::trajectory_checker_callback(
         }
       }
 
-      if (m_is_waiting && flying_id_copy == wp_pair.second.waypoint_id) {
+      if (is_waiting() && flying_id_copy == wp_pair.second.waypoint_id) {
         ROS_WARN("Collision detected on a trajectory, while waiting at the last point.");
         continue;
       }
@@ -476,7 +489,8 @@ void uav_ros_tracker::OctomapPlannerClient::trajectory_checker_callback(
 void uav_ros_tracker::OctomapPlannerClient::waiting_callback(const ros::TimerEvent& e)
 {
   ROS_INFO("[%s::waiting_callback] Waiting at waypoint finished!", NAME);
-  int flying_id_copy = m_flying_id.load(std::memory_order_relaxed);
+  int flying_id_copy = get_flying_id();
+  set_state(IDLE);
 
   {
     std::lock_guard<std::mutex> lock(m_waypoint_buffer_mutex);
@@ -493,11 +507,6 @@ void uav_ros_tracker::OctomapPlannerClient::waiting_callback(const ros::TimerEve
         "waiting.");
     }
   }
-
-  m_flying_id.store(-1, std::memory_order_relaxed);
-
-  m_is_waiting = false;
-  m_is_flying  = false;
 }
 
 void uav_ros_tracker::OctomapPlannerClient::plannning_callback(const ros::TimerEvent& e)
@@ -540,7 +549,7 @@ void uav_ros_tracker::OctomapPlannerClient::plannning_callback(const ros::TimerE
   }
 
   int planned_trajectory_count = plannedPathCount();
-  if (m_is_flying && planned_trajectory_count == 0) {
+  if (is_flying() && planned_trajectory_count == 0) {
     ROS_WARN_THROTTLE(2.0,
                       "[%s::planning_callback] Not planning while flying and no other "
                       "trajectories are available!",

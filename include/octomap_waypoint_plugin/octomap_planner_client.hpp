@@ -15,6 +15,14 @@
 
 namespace uav_ros_tracker {
 
+enum State { 
+  IDLE,  // There is no trajectory, path was not planned yet
+  READY_TO_FLY, // The trajectory has been requested but not yet started
+  FLYING,  // UAV is flying, trajectory is active
+  WAITING  // UAV is waiting
+};
+static constexpr auto NO_ID = -1;
+
 struct WaypointInfo
 {
   int                              waypoint_id;
@@ -53,15 +61,15 @@ public:
 
 private:
   std::optional<uav_ros_msgs::WaypointPtr> getCurrentWaypoint();
-  double                           distanceToCurrentWp();
-  trajectory_msgs::JointTrajectory planTrajectoryBetween(
-    const trajectory_msgs::JointTrajectoryPoint& start_point,
-    const trajectory_msgs::JointTrajectoryPoint& end_point,
-    const std::string&                           waypoint_frame);
+  double                                   distanceToCurrentWp();
+  trajectory_msgs::JointTrajectory         planTrajectoryBetween(
+            const trajectory_msgs::JointTrajectoryPoint& start_point,
+            const trajectory_msgs::JointTrajectoryPoint& end_point,
+            const std::string&                           waypoint_frame);
   int plannedPathCount();
 
   static constexpr auto NAME         = "OctomapPlannerClient";
-  static constexpr auto DISTANCE_TOL = 1.5;
+  static constexpr auto DISTANCE_TOL = 0.8;
 
   ros::Timer m_waiting_timer;
   void       waiting_callback(const ros::TimerEvent& e);
@@ -80,9 +88,7 @@ private:
   ros::Subscriber            m_carrot_pose_sub;
   void                       carrot_pose_cb(const geometry_msgs::PoseStamped& pose);
 
-  std::atomic<bool> m_is_flying  = false;
-  std::atomic<bool> m_is_waiting = false;
-  std::atomic<int>  m_flying_id{ -1 };
+  int m_flying_id = NO_ID;
 
   std::mutex                                                       m_transform_map_mutex;
   std::unordered_map<std::string, geometry_msgs::TransformStamped> m_transform_map;
@@ -102,6 +108,46 @@ private:
   bool               m_enable_replanning;
   std::string        m_last_waypoint_frame;
   int                m_waypoint_id_counter = 1;
+
+  State get_state()
+  {
+    State copy;
+    {
+      std::lock_guard<std::mutex> lock(m_state_mutex);
+      copy = m_current_state;
+    }
+    return copy;
+  }
+
+  void set_state(State newState, int new_id = -1)
+  {
+    {
+      std::lock_guard<std::mutex> lock(m_state_mutex);
+      m_current_state = newState;
+
+      if (m_current_state == IDLE) { m_flying_id = -1; }
+
+      if (m_current_state == READY_TO_FLY) { m_flying_id = new_id; }
+    }
+  }
+
+  int get_flying_id()
+  {
+    int id = -1;
+    {
+      std::lock_guard<std::mutex> lock(m_state_mutex);
+      id = m_flying_id;
+    }
+    return id;
+  }
+
+  bool is_flying() { return get_state() == FLYING; }
+  bool is_waiting() { return get_state() == WAITING; }
+  bool is_idle() { return get_state() == IDLE; }
+  bool is_ready_to_fly() { return get_state() == READY_TO_FLY; }
+
+  std::mutex m_state_mutex;
+  State      m_current_state = IDLE;
 };
 
 
