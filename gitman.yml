@@ -80,7 +80,7 @@ sources_locked:
       - git submodule update --init --recursive
   - repo: https://github.com/larics/octomap_mapping/
     name: octomap_mapping
-    rev: 23a77df2b170f3a2c60ec275372f84f59cc967eb
+    rev: beac595e8feefc9cd2c92065a1fbcdd73791487b
     type: git
     sparse_paths:
       -
