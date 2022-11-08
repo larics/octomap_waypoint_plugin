@@ -69,7 +69,7 @@ private:
   int plannedPathCount();
 
   static constexpr auto NAME         = "OctomapPlannerClient";
-  static constexpr auto DISTANCE_TOL = 0.8;
+  static constexpr auto DISTANCE_TOL = 2.5;
 
   ros::Timer m_waiting_timer;
   void       waiting_callback(const ros::TimerEvent& e);
