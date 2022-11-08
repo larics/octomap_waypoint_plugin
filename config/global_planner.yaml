@@ -1,10 +1,10 @@
 global_planner:
-  map_config_file: "Workspace/planning_ws/src/octomap_waypoint_plugin/config/global_planner.yaml"
-  trajectory_config_file: "Workspace/planning_ws/src/octomap_waypoint_plugin/config/global_planner.yaml"
-  path_planner_config_file: "Workspace/planning_ws/src/octomap_waypoint_plugin/config/global_planner.yaml"
-  state_validity_checker_config_file: "Workspace/planning_ws/src/octomap_waypoint_plugin/config/global_planner.yaml"
-  kinematics_config_file: "Workspace/planning_ws/src/octomap_waypoint_plugin/config/global_planner.yaml"
-  model_correction_file: "Workspace/planning_ws/src/octomap_waypoint_plugin_modules/larics_motion_planning/config/model_correction_config_example.yaml"
+  map_config_file: "Workspace/uav_ws/src/uav_ros_indoor_modules/octomap_waypoint_plugin/config/global_planner.yaml"
+  trajectory_config_file: "Workspace/uav_ws/src/uav_ros_indoor_modules/octomap_waypoint_plugin/config/global_planner.yaml"
+  path_planner_config_file: "Workspace/uav_ws/src/uav_ros_indoor_modules/octomap_waypoint_plugin/config/global_planner.yaml"
+  state_validity_checker_config_file: "Workspace/uav_ws/src/uav_ros_indoor_modules/octomap_waypoint_plugin/config/global_planner.yaml"
+  kinematics_config_file: "Workspace/uav_ws/src/uav_ros_indoor_modules/octomap_waypoint_plugin/config/global_planner.yaml"
+  model_correction_file: "Workspace/uav_ws/src/uav_ros_indoor_modules/octomap_waypoint_plugin_modules/larics_motion_planning/config/model_correction_config_example.yaml"
 
   # If planning for trajectory only, global planner will try to plan several
   # times if previous attempts fail. In case all attempts fail, empty trajectory
@@ -69,7 +69,7 @@ global_planner:
 
 
 octomap:
-  path_to_file: "Workspace/planning_ws/src/octomap_waypoint_plugin_modules/larics_motion_planning/config/empty_map.binvox.bt"
+  path_to_file: "Workspace/uav_ws/src/uav_ros_indoor_modules/octomap_waypoint_plugin_modules/larics_motion_planning/config/empty_map.binvox.bt"
   # Search depth of octomap tree. 16 is best resolution, slowest search(although
   # experience shows that there is no significant increase in search time by 
   # setting this parameter to < 16)
