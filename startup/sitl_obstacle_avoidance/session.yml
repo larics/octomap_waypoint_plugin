@@ -81,4 +81,6 @@ windows:
   - rviz:
       layout: tiled
       panes:
-        - waitForRos; waitFor /$UAV_NAMESPACE/$ODOMETRY_TOPIC; rviz -d custom_config/carto.rviz
+        - waitForRos; waitFor /$UAV_NAMESPACE/$ODOMETRY_TOPIC; 
+          roslaunch uav_ros_gui rqt.launch 
+          perspective:=$(pwd)/custom_config/uav_ros_gui.perspective
